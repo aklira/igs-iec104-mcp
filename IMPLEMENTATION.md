@@ -544,6 +544,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 **X1 — External target model and policy**
 - Depends: C4, C2.
 - Done when: the control plane refuses undeclared operations on a target, and a connectivity probe is explicit and opt-in.
+- Done (D-034): `undeclared` refuses a scenario's operation a target does not list, `target_validate` reports a target without connecting, and its probe is explicit (`probe`) and sends no IEC frame.
 
 **X2 — Published server endpoints**
 - Depends: D2.
@@ -616,7 +617,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | M2 Scenario and run tools | [x] |
 | M3 Confirmation on external targets | [ ] |
 | M4 Streamable HTTP transport ⛔ | [ ] |
-| X1 External target model and policy | [ ] |
+| X1 External target model and policy | [x] |
 | X2 Published server endpoints | [ ] |
 | X3 Interoperability, independent implementation ⛔ | [ ] |
 | R1 Run store | [x] |

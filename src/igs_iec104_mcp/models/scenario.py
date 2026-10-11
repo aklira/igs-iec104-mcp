@@ -24,6 +24,7 @@ from igs_iec104_mcp.models.common import (
     Timing,
 )
 from igs_iec104_mcp.models.points import PointKind, check_value
+from igs_iec104_mcp.models.target import Operation, undeclared
 
 ACTIONS: tuple[str, ...] = (
     "wait_transfer_started",
@@ -396,7 +397,6 @@ class _Checker:
     def command(self, step: SendCommand, where: str, issues: list[Issue]) -> None:
         if step.target in self.targets:
             target = self.targets[step.target]
-            allowed = sorted(op.value for op in target.allowed_operations)
             if target.role != "client":
                 issues.append(
                     Issue(
@@ -404,8 +404,11 @@ class _Checker:
                         f"{step.target!r} is a server, so it cannot send a command",
                     )
                 )
-            elif "command" not in allowed:
-                listed = ", ".join(allowed) or "none"
+            elif undeclared(target, {Operation.COMMAND}):
+                listed = (
+                    ", ".join(sorted(op.value for op in target.allowed_operations))
+                    or "none"
+                )
                 issues.append(
                     Issue(
                         where,

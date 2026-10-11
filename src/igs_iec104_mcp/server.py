@@ -18,7 +18,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from igs_iec104_mcp.definitions import service
+from igs_iec104_mcp.definitions import service, targets
 from igs_iec104_mcp.definitions.store import ProjectStore, StoreError
 from igs_iec104_mcp.scenarios.runner import (
     DockerEngine,
@@ -204,6 +204,24 @@ def create_server(
     )
     async def run_cancel(run_id: str) -> RunOut:
         return run_out(await _acall(lambda: runner.cancel(run_id)))
+
+    @server.tool(
+        name="target_validate",
+        description="Check an external target of a stored bench: its endpoint and the "
+        "operations it allows, without connecting. With probe set, also try a TCP "
+        "connection to its endpoint, which sends no IEC frame.",
+    )
+    async def target_validate(
+        bench: str,
+        target: str,
+        probe: bool = False,
+        timeout: float = targets.PROBE_DEFAULT_SECONDS,
+    ) -> targets.TargetReport:
+        return await _acall(
+            lambda: targets.validate_target(
+                store, bench, target, probe=probe, timeout=timeout
+            )
+        )
 
     return server
 

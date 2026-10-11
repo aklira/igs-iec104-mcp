@@ -685,3 +685,26 @@ test can show it.
   scenario is not found; a cancel of an ended run is an invalid state; a bad cursor is refused; the journal is paged);
   `tests/unit/test_scenario_actions.py` (the update waits for the connected client); `tests/integration/test_mcp_stdio.py`
   (the fourteen tools are listed).
+
+## D-034: External targets: the operation policy and the explicit probe (X1)
+
+- Date: 2026-10-11 (task X1).
+- Decision: the model of an external target (C4) already lists its allowed operations. X1 adds the one rule that
+  applies them: `models/target.py` `undeclared(target, required)` names the operations a step needs that the target does
+  not list. The scenario checker uses it for a command to an external target (the only operation a step can reach on one
+  today), so a scenario that needs an undeclared operation is refused before any run starts, by the same check the run
+  uses (`check_scenario`). A step that would need a new operation on a target extends the mapping, not the checker.
+- Static check: `target_validate(bench, target)` reports the target's endpoint, common address, whether it is secured,
+  and its allowed operations. It reads the stored bench and connects to nothing. The stored bench must check, and the
+  target must be one the bench declares.
+- Connectivity probe: explicit and opt-in. The tool runs a probe only when `probe` is set, with a timeout of 0.1 to 10
+  seconds (3 by default). A probe is a TCP connection, opened and closed again, with no IEC 60870-5-104 frame sent: it
+  is not an operation of the policy. It runs only for a target the stored bench declares, so a request cannot reach an
+  address the bench does not name. A peer may log the connection attempt.
+- Not in X1: a confirmation for a state-changing operation (M3, through MCP elicitation, and the opt-in of the target
+  definition); the external connections of a bench, which the planner refuses until X2 and M3; a secured probe, which
+  checks TCP only and does not attempt the TLS handshake; the endpoint of a published server (X2).
+- Tests: `tests/unit/test_external_targets.py` (8 tests: the undeclared operations; a command to a target that does not
+  allow it is refused, and one that allows it passes; the static report makes no connection; a probe connects once and
+  sends nothing; a probe of a reserved, refusing port reports the failure; an undeclared target and an unknown bench are
+  not found; a probe timeout out of range is an invalid argument), and the MCP tool list in `test_mcp_stdio.py`.

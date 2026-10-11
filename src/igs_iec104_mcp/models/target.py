@@ -91,3 +91,15 @@ class ExternalTarget(Definition):
                 "an operation is listed twice: list each allowed operation once"
             )
         return value
+
+
+def undeclared(target: ExternalTarget, required: set[Operation]) -> list[str]:
+    """The operations a step needs that the target does not list, by name and in order.
+
+    An empty list means the target allows every operation the step needs. This is the
+    one rule of the control plane for operations on an external target: a scenario that
+    needs an operation the target does not list is refused, before any run starts (§5,
+    §9).
+    """
+    allowed = set(target.allowed_operations)
+    return sorted(op.value for op in required if op not in allowed)

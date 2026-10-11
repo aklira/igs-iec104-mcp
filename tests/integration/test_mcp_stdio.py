@@ -31,6 +31,7 @@ TOOLS = {
     "run_list",
     "run_events",
     "run_cancel",
+    "target_validate",
 }
 
 
