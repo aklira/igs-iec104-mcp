@@ -279,3 +279,28 @@ test can show it.
   `IGS_RUNTIME_IMAGE`; the CI integration job builds it.
 - Correction: the earlier records (C4, D-013, Q-002) said eleven point kinds. The upstream `PointValue` has
   ten variants; the unserved kinds are step, bitstring, counter, packed, and normalized-unqualified.
+
+## D-017: The scenario engine: steps, cursors, deadlines, and the run states
+
+- Date: 2026-10-11 (task E1).
+- Decision: the engine runs the steps of a scenario in order. It knows no protocol: each action is run by a
+  handler that the caller supplies, and a handler reads the runtimes' events through a `Source` (the last
+  sequence number of an instance, and the events after a cursor). An action with no handler is UNSUPPORTED,
+  never passed.
+- Cursors: a handler captures the cursor of its instance before it triggers or waits for anything. The engine
+  matches an event only when its sequence number is after the cursor, even when the source returns older
+  events too.
+- Deadlines: a step with a `timeout` has its deadline (asyncio's monotonic clock); a step without one is bounded
+  by the scenario only. The scenario's `global_timeout`, when set, bounds the whole run. A deadline that passes
+  during a step gives that step TIMED_OUT; the global one ends the run as FAILED.
+- Fail-fast: `fail_fast` (true by default in the model) stops the run after the first step whose verdict is
+  not PASSED. Without it, the later steps run and the run is judged on all of them.
+- Status of a run: any ERROR or UNSUPPORTED verdict makes the run ERROR (it could not be judged); otherwise any
+  verdict that is not PASSED, or the global deadline, makes it FAILED; otherwise it is PASSED. A run moves
+  only along its states (pending, running, then an ended status), and `RunMachine` refuses the others.
+- Not in E1: the handlers of the actions (E2 for the assertions, E5 for the restarts), the cleanup steps after
+  success, failure, or cancellation (E3), parallel branches (E4), and the `Source` over the runtime's events
+  API, which E2 binds to the control client. Steps are numbered in their verdicts; the schema has no step names.
+- Test: `tests/unit/test_scenario_engine.py` (ordering, a stale observation before the cursor, a step deadline,
+  the global deadline during a step, fail-fast on and off, an action with no handler, an unexpected error, the
+  run states, a step without a deadline).

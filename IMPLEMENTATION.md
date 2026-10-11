@@ -575,7 +575,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | D1 Docker adapter and labels | [x] |
 | D2 Test bench lifecycle | [x] |
 | D3 Reconciliation | [ ] |
-| E1 Steps, cursors, run state machine | [ ] |
+| E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [ ] |
 | E3 Cancellation and cleanup | [ ] |
 | E4 Parallel branches and barriers | [ ] |
