@@ -21,7 +21,7 @@ use std::path::Path;
 
 use igs_iec104::process_image::PointValue;
 use igs_iec104_codec::elements::{
-    Bcr, Bsi, Diq, DoublePoint, Nva, Qds, QualityFlags, ShortFloat, Siq, Sva, Vti,
+    Bcr, Bsi, Diq, DoublePoint, Nva, Qds, QualityFlags, Scd, ShortFloat, Siq, Sva, Vti,
 };
 use igs_iec104_codec::header::InformationObjectAddress;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,13 @@ pub enum Kind {
     /// Bitstring of 32 bits: M_BO_NA_1, or M_BO_TB_1 when stamped. Its value is an integer from 0 to
     /// 4294967295, where bit n (1 to 32) is the bit of 2^(n - 1).
     Bitstring,
+    /// Packed single-point information with change detection: M_PS_NA_1, which has no time-tagged form.
+    /// Its value is an object with `status` and `change`, each an integer from 0 to 65535, where bit n
+    /// (1 to 16) is point n.
+    Packed,
+    /// Normalized value without quality: M_ME_ND_1, which has no time-tagged form. Its value is a number
+    /// from -1 up to 1, exclusive of 1, on a grid of 2^-15.
+    NormalizedUnqualified,
 }
 
 impl Kind {
@@ -73,6 +80,8 @@ impl Kind {
             Self::Counter => "an integer from -2147483648 to 2147483647",
             Self::Step => "an object with 'value' from -64 to 63 and 'transient' true or false",
             Self::Bitstring => "an integer from 0 to 4294967295",
+            Self::Packed => "an object with 'status' and 'change', each an integer from 0 to 65535",
+            Self::NormalizedUnqualified => "a number from -1 up to 1, excluding 1",
         }
     }
 }
@@ -371,6 +380,26 @@ pub fn value_of(kind: Kind, address: u32, json: &Value) -> Result<PointValue, Po
             let number = u32::try_from(number).map_err(|_| invalid())?;
             PointValue::Bitstring(bitstring_from(number).ok_or_else(invalid)?, quality)
         }
+        Kind::Packed => {
+            let object = json.as_object().filter(|object| object.len() == 2);
+            let object = object.ok_or_else(invalid)?;
+            let status = object
+                .get("status")
+                .and_then(Value::as_u64)
+                .ok_or_else(invalid)?;
+            let change = object
+                .get("change")
+                .and_then(Value::as_u64)
+                .ok_or_else(invalid)?;
+            let status = u16::try_from(status).map_err(|_| invalid())?;
+            let change = u16::try_from(change).map_err(|_| invalid())?;
+            PointValue::Packed(packed_from(status, change).ok_or_else(invalid)?, quality)
+        }
+        Kind::NormalizedUnqualified => {
+            let number = json.as_f64().ok_or_else(invalid)?;
+            let value = Nva::try_from_f32(number as f32).ok_or_else(invalid)?;
+            PointValue::NormalizedUnqualified(value)
+        }
     })
 }
 
@@ -386,6 +415,33 @@ fn bitstring_to(bits: Bsi) -> u32 {
     (1..=32u8)
         .filter(|&bit| bits.bit(bit) == Some(true))
         .fold(0, |number, bit| number | (1u32 << (bit - 1)))
+}
+
+/// The packed information of `status` and `change`: bit n (1 to 16) is point n.
+fn packed_from(status: u16, change: u16) -> Option<Scd> {
+    (1..=16u8).try_fold(Scd::new(), |bits, point| {
+        let mask = 1u16 << (point - 1);
+        let bits = bits.with_status(point, status & mask != 0)?;
+        bits.with_changed(point, change & mask != 0)
+    })
+}
+
+/// The status and the change of packed information, each as its integer.
+fn packed_to(bits: Scd) -> (u16, u16) {
+    (1..=16u8).fold((0, 0), |(status, change), point| {
+        let mask = 1u16 << (point - 1);
+        let status = if bits.status(point) == Some(true) {
+            status | mask
+        } else {
+            status
+        };
+        let change = if bits.changed(point) == Some(true) {
+            change | mask
+        } else {
+            change
+        };
+        (status, change)
+    })
 }
 
 fn double_from(json: &Value) -> Option<DoublePoint> {
@@ -420,7 +476,11 @@ pub fn json_of(value: PointValue) -> Value {
             "transient": step.is_transient(),
         }),
         PointValue::Bitstring(bits, _) => Value::from(bitstring_to(bits)),
-        _ => Value::Null,
+        PointValue::Packed(bits, _) => {
+            let (status, change) = packed_to(bits);
+            serde_json::json!({"status": status, "change": change})
+        }
+        PointValue::NormalizedUnqualified(nva) => number(f64::from(nva.as_f32())),
     }
 }
 
@@ -591,5 +651,39 @@ mod tests {
             );
             assert!(parse(&file(&text)).is_err(), "{kind} cannot be a walk");
         }
+    }
+
+    #[test]
+    fn a_packed_and_an_unqualified_point_take_their_forms_and_come_back_as_they_went() {
+        let points = parse(&file(
+            r#"{"address": 1, "kind": "packed", "value": {"status": 65535, "change": 5}},
+               {"address": 2, "kind": "normalized_unqualified", "value": -0.5}"#,
+        ))
+        .expect("the forms are accepted");
+        let packed = json_of(points[0].point_value().expect("a packed point"));
+        assert_eq!(packed, serde_json::json!({"status": 65535, "change": 5}));
+        let unqualified = json_of(points[1].point_value().expect("an unqualified value"));
+        assert_eq!(unqualified, serde_json::json!(-0.5));
+    }
+
+    #[test]
+    fn a_packed_or_an_unqualified_value_outside_its_form_is_refused() {
+        let bad = [
+            r#"{"address": 1, "kind": "packed", "value": {"status": 65536, "change": 0}}"#,
+            r#"{"address": 1, "kind": "packed", "value": {"status": 1}}"#,
+            r#"{"address": 1, "kind": "packed", "value": {"status": -1, "change": 0}}"#,
+            r#"{"address": 1, "kind": "packed", "value": 1}"#,
+            r#"{"address": 1, "kind": "normalized_unqualified", "value": 1.0}"#,
+            r#"{"address": 1, "kind": "normalized_unqualified", "value": "0.5"}"#,
+        ];
+        for text in bad {
+            assert!(parse(&file(text)).is_err(), "{text} is not a valid form");
+        }
+        let walk = r#"{"address": 1, "kind": "normalized_unqualified", "value": 0.5,
+            "simulation": {"kind": "walk", "period_ms": 100, "increment": 0.1}}"#;
+        assert!(
+            parse(&file(walk)).is_err(),
+            "an unqualified value is not a measured point"
+        );
     }
 }

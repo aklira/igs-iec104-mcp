@@ -461,3 +461,54 @@ async fn next_reading(client: &mut Client, shape: Body, address: u32) -> Asdu {
     .await
     .expect("the reading arrives within the patience of the test")
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_packed_and_an_unqualified_point_are_served_and_their_updates_reach_the_client() {
+    let points = PointsFile::new(
+        "packed-unqualified",
+        r#"{"schema_version": 1, "points": [
+            {"address": 7, "kind": "packed", "value": {"status": 0, "change": 0}},
+            {"address": 8, "kind": "normalized_unqualified", "value": 0.25}
+        ]}"#,
+    );
+    let token = TokenFile::new("s4d-packed");
+    let station = Station::start(&points, 1024, Duration::from_secs(30), &token).await;
+    let mut client = controller(station.listen).await;
+
+    let (status, _) = post(
+        station.control,
+        "/v1/points/7",
+        &serde_json::json!({"value": {"status": 5, "change": 1}}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = post(
+        station.control,
+        "/v1/points/8",
+        &serde_json::json!({"value": -0.75}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // The updates leave as spontaneous readings: packed information (M_PS_NA_1) and a normalized value
+    // without quality (M_ME_ND_1).
+    let packed = next_reading(&mut client, Body::M_PS_NA_1(Objects::Individual(vec![])), 7).await;
+    let Body::M_PS_NA_1(Objects::Individual(objects)) = &packed.body else {
+        panic!("packed information is an individual object list");
+    };
+    let bits = objects[0].value.0;
+    assert_eq!(bits.status(1), Some(true));
+    assert_eq!(bits.status(2), Some(false));
+    assert_eq!(bits.status(3), Some(true));
+    assert_eq!(bits.changed(1), Some(true));
+    assert_eq!(bits.changed(3), Some(false));
+
+    let plain = next_reading(&mut client, Body::M_ME_ND_1(Objects::Individual(vec![])), 8).await;
+    let Body::M_ME_ND_1(Objects::Individual(objects)) = &plain.body else {
+        panic!("a normalized value without quality is an individual object list");
+    };
+    assert_eq!(objects[0].value.as_f32(), -0.75);
+
+    drop(client);
+    station.stop().await;
+}

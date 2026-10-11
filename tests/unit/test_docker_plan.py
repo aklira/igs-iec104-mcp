@@ -10,6 +10,7 @@ import pytest
 from bench_data import BENCH
 from pydantic import ValidationError
 
+from igs_iec104_mcp.docker import plan
 from igs_iec104_mcp.docker.plan import (
     POINTS_FILE,
     PlanError,
@@ -78,16 +79,27 @@ def test_the_event_buffer_is_the_capacity_of_the_runtime() -> None:
     assert arguments[arguments.index("--event-capacity") + 1] == "500"
 
 
-def test_a_point_kind_the_runtime_does_not_serve_is_refused_by_name() -> None:
+def test_a_point_kind_the_runtime_does_not_serve_is_refused_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Every kind is served now (S4d), so the refusal is tested with a runtime
+    # that serves fewer.
+    monkeypatch.setattr(plan, "SERVED_KINDS", frozenset({"single", "double"}))
     data = copy.deepcopy(BENCH)
     instance(data, "server-1")["points"] = [
-        {"address": 1, "kind": "packed", "value": {"status": 1, "change": 0}},
-        {"address": 2, "kind": "normalized_unqualified", "value": 0.5},
+        {"address": 1, "kind": "counter", "value": 7},
+        {"address": 2, "kind": "scaled", "value": 3},
     ]
     (issue,) = refused(data)
     assert "server-1" in issue
-    assert "normalized_unqualified, packed" in issue
+    assert "counter, scaled" in issue
     assert "S4" in issue
+
+
+def test_every_kind_of_the_model_is_served_by_the_runtime() -> None:
+    from igs_iec104_mcp.models.points import PointKind
+
+    assert {str(kind) for kind in PointKind} == plan.SERVED_KINDS
 
 
 def test_link_parameters_other_than_the_defaults_are_refused_by_name() -> None:
@@ -147,9 +159,7 @@ def test_a_client_with_two_connections_is_refused() -> None:
 def test_every_problem_is_reported_together() -> None:
     data = copy.deepcopy(BENCH)
     instance(data, "client-1")["parameters"] = {"w": 4}
-    instance(data, "server-1")["points"] = [
-        {"address": 1, "kind": "packed", "value": {"status": 1, "change": 0}}
-    ]
+    data["connections"] = []
     assert len(refused(data)) == 2
 
 

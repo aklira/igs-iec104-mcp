@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use igs_iec104::process_image::PointValue;
 use igs_iec104_codec::asdu::{Asdu, Body, Objects, Timed};
-use igs_iec104_codec::elements::{Bcr, Bsi, Diq, Qds, QualityFlags, Siq, Vti};
+use igs_iec104_codec::elements::{Bcr, Bsi, Diq, Nva, Qds, QualityFlags, Scd, Siq, Vti};
 use igs_iec104_codec::formats::Cp56Time2a;
 use igs_iec104_codec::generated::profile::TypeId;
 
@@ -141,6 +141,8 @@ pub fn observations(asdu: &Asdu) -> Vec<(u32, Observed)> {
         Body::M_ST_TB_1(objects) => stamped(objects, |(vti, qds)| step(vti, qds, None)),
         Body::M_BO_NA_1(objects) => plain(objects, |(bsi, qds)| bitstring(bsi, qds, None)),
         Body::M_BO_TB_1(objects) => stamped(objects, |(bsi, qds)| bitstring(bsi, qds, None)),
+        Body::M_PS_NA_1(objects) => plain(objects, |(scd, qds)| packed(scd, qds)),
+        Body::M_ME_ND_1(objects) => plain(objects, normalized_unqualified),
         _ => Vec::new(),
     }
 }
@@ -235,6 +237,29 @@ fn bitstring(bits: Bsi, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
     }
 }
 
+fn packed(bits: Scd, qds: Qds) -> Observed {
+    Observed {
+        value: PointValue::Packed(bits, qds),
+        quality: Quality::of(qds.quality, false),
+        time: None,
+    }
+}
+
+/// A normalized value without quality descriptor: it has no quality flags, so none is set.
+fn normalized_unqualified(nva: Nva) -> Observed {
+    Observed {
+        value: PointValue::NormalizedUnqualified(nva),
+        quality: Quality {
+            invalid: false,
+            not_topical: false,
+            substituted: false,
+            blocked: false,
+            overflow: false,
+        },
+        time: None,
+    }
+}
+
 fn measured(value: PointValue, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
     Observed {
         value,
@@ -325,6 +350,26 @@ mod tests {
             PointValue::Bitstring(bits, Qds::default())
         );
         assert!(stamped[0].1.time.is_some());
+    }
+
+    #[test]
+    fn packed_and_unqualified_readings_are_observed_without_a_time_tag() {
+        let mut bits = Scd::new().with_status(3, true).expect("point 3");
+        bits = bits.with_changed(3, true).expect("point 3 changed");
+        let packed = observations(&asdu(
+            cause::SPONTANEOUS,
+            Body::M_PS_NA_1(individual(vec![(8, (bits, Qds::default()))])),
+        ));
+        assert_eq!(packed[0].0, 8);
+        assert_eq!(packed[0].1.value, PointValue::Packed(bits, Qds::default()));
+        assert_eq!(packed[0].1.time, None);
+        let nva = Nva::try_from_f32(0.5).expect("a normalized value");
+        let plain = observations(&asdu(
+            cause::SPONTANEOUS,
+            Body::M_ME_ND_1(individual(vec![(9, nva)])),
+        ));
+        assert_eq!(plain[0].1.value, PointValue::NormalizedUnqualified(nva));
+        assert!(!plain[0].1.quality.invalid);
     }
 
     fn on(on: bool) -> Siq {

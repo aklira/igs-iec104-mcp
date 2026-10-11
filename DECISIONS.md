@@ -413,3 +413,21 @@ test can show it.
   simulation), `image.rs` (the decoding of plain and time-tagged step and bitstring readings), and
   `tests/station.rs` (a step and a bitstring are served, and their updates reach a client as M_ST and M_BO
   readings with their values).
+
+## D-024: The packed and normalized-unqualified point kinds (S4d): every kind is served
+
+- Date: 2026-10-11 (task S4d).
+- Decision: the runtime serves `packed` points (M_PS_NA_1, which has no time-tagged form), whose value is an
+  object `{"status": 0..65535, "change": 0..65535}`, where bit n (1 to 16) is point n of the status and of the
+  change, as the upstream `Scd` numbers them; and `normalized_unqualified` points (M_ME_ND_1, no time tag), whose
+  value is a normalized number as for `normalized`. The client decodes a packed reading with its quality, and an
+  unqualified reading with no quality flag set, since that type carries no quality descriptor. Neither can be
+  simulated (a walk or a ramp needs a measured point).
+- With this, the runtime serves all ten monitoring kinds, so the plan no longer refuses a kind by name. The
+  refusal mechanism stays in the plan for a kind the runtime does not serve in the future; its test lowers the
+  served set, and a test checks that the set equals the kinds of the model. The refusal of D-019 is therefore
+  closed in practice.
+- Contract: a new point kind is additive, so the contract is 1.6.0.
+- Tests: `points.rs` (the forms, the refusals, the simulation refusal), `image.rs` (the packed and unqualified
+  readings), `tests/station.rs` (the two kinds are served, and their updates reach a client as M_PS_NA_1 and
+  M_ME_ND_1 readings with their values), `tests/unit/test_docker_plan.py` (every model kind is served).

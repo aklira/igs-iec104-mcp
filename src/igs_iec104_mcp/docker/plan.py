@@ -28,9 +28,8 @@ from igs_iec104_mcp.docker.specs import (
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.instance import Instance, LinkParameters, ResourceLimits
 
-# The point kinds the runtime serves (its `points.rs`). The others are refused by
-# name until task S4 serves them (D-019). Served so far: counter (S4a), step and
-# bitstring (S4c).
+# The point kinds the runtime serves (its `points.rs`): all ten since S4d (D-019).
+# A kind the runtime does not serve is refused by name; the refusal serves new kinds.
 SERVED_KINDS: frozenset[str] = frozenset(
     {
         "single",
@@ -41,6 +40,8 @@ SERVED_KINDS: frozenset[str] = frozenset(
         "counter",
         "step",
         "bitstring",
+        "packed",
+        "normalized_unqualified",
     }
 )
 # The link parameters the runtime uses: the defaults of §9.6, which the model carries.

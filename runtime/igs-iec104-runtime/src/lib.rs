@@ -28,7 +28,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The version of the control API and event contract (`contracts/`). It changes with an incompatible
 /// change of either file.
-pub const CONTRACT_VERSION: &str = "1.5.0";
+pub const CONTRACT_VERSION: &str = "1.6.0";
 
 /// The identity line of the runtime: its name, version, and the protocol port of the library.
 pub fn banner() -> String {
