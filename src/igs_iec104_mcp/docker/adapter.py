@@ -27,7 +27,6 @@ from igs_iec104_mcp.docker.specs import (
     CONTROL_PORT,
     IMAGE_PATTERN,
     RUN_DIRECTORY,
-    RUN_DIRECTORY_OPTIONS,
     RUNTIME_UID,
     SECURITY_OPTIONS,
     ContainerSpec,
@@ -291,7 +290,6 @@ class DockerAdapter:
             nano_cpus=round(spec.limits.cpus * 1_000_000_000),
             pids_limit=spec.limits.pids,
             ports={f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)},
-            tmpfs={RUN_DIRECTORY: RUN_DIRECTORY_OPTIONS},
         )
         return Resource("container", str(container.id), name), True
 

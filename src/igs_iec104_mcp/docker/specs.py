@@ -29,12 +29,11 @@ MIN_PIDS = 16
 # The runtime's control API listens on this port inside its container. The engine
 # publishes it on 127.0.0.1 at a port it picks, which the controller reads back (D2).
 CONTROL_PORT = 8080
-# The directory of the runtime's files (its control token and its points). It is an
-# in-memory mount, owned by the runtime's user, so no file of a run is on the host disk.
+# The directory of the runtime's files (its control token and its points). The image
+# creates it, owned by the runtime's user; the files are copied in before the container
+# starts, so no mount is used: a mount made at start would hide the copied files.
 RUN_DIRECTORY = "/run/igs"
 RUNTIME_UID = 10001
-# The files in it are owned by the runtime's user and readable by it alone (mode 0400).
-RUN_DIRECTORY_OPTIONS = "size=1m,mode=0755"
 # The runtime is hardened by default: no privilege escalation, with the read-only root
 # filesystem and the dropped capabilities set in the container spec.
 SECURITY_OPTIONS = ("no-new-privileges:true",)
@@ -85,8 +84,7 @@ class NetworkSpec:
 class ContainerSpec:
     """A runtime container: its instance, its image, its network (by name in the
     bench), its limits, and the arguments of the runtime. It has no bind mount, no
-    privilege, and no port but the control port: the only writable path is the
-    in-memory directory `RUN_DIRECTORY`."""
+    privilege, and no port but the control port."""
 
     instance: str
     image: str

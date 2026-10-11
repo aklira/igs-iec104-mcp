@@ -17,7 +17,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libssl3t64 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 runtime \
-    && useradd --system --uid 10001 --gid runtime --no-create-home --shell /usr/sbin/nologin runtime
+    && useradd --system --uid 10001 --gid runtime --no-create-home --shell /usr/sbin/nologin runtime \
+    && install -d -o runtime -g runtime -m 0700 /run/igs
 COPY --from=build /src/target/release/igs-iec104-runtime /usr/local/bin/igs-iec104-runtime
 USER runtime
 ENTRYPOINT ["/usr/local/bin/igs-iec104-runtime"]

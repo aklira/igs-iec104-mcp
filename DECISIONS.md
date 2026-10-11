@@ -256,10 +256,14 @@ test can show it.
   given its station's address on their network (the container address the engine reports, and the bound port);
   the runtime takes IP addresses, not container names.
 - Files: the control token and the points are copied into the container with the engine's archive
-  interface, into an in-memory directory (`/run/igs`, `mode=0755`). They are owned by the runtime's user
-  (UID 10001, fixed in `docker/runtime.Dockerfile`) and read only by it (mode 0400). They are never in the
-  environment, a bind mount, or the evidence. The controller writes the token to a temporary directory
-  outside the project, which is removed when the start ends.
+  interface, into the directory `/run/igs`, which the image creates, owned by the runtime's user (UID 10001,
+  fixed in `docker/runtime.Dockerfile`). They are read by that user alone (mode 0400). They are never in the
+  environment, a bind mount, or the evidence. The files are copied before the container starts, so they
+  live in the container's writable layer until the container is removed. The controller writes the token to
+  a temporary directory outside the project, which is removed when the start ends.
+- Correction: the first version mounted an in-memory directory at `/run/igs`. A mount made at start hides
+  files copied before it, and Docker creates the mount point only at start, so the copy failed there; Podman
+  accepted both, which is why local runs passed. The directory is now created by the image.
 - Plan: a bench is planned before anything is created. The plan refuses, by name: a point kind the runtime
   does not serve (Q-002); link parameters other than the defaults (Q-003); a connection that reaches an
   external target (task X1); a connection whose ends are not on one network; a client without exactly one

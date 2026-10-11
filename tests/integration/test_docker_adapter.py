@@ -7,6 +7,7 @@ The tests pull one small image by its digest. Without an engine they skip, excep
 where a missing engine fails the run. Podman's Docker-compatible socket works too:
 `DOCKER_HOST=unix:///run/user/<uid>/podman/podman.sock`."""
 
+import asyncio
 import secrets
 from collections.abc import AsyncIterator
 from typing import Any
@@ -55,7 +56,15 @@ async def owner(adapter: DockerAdapter) -> AsyncIterator[Ownership]:
     await adapter.remove_owned(run)
 
 
+def ensure_image() -> None:
+    """Pulls the test image by its digest when the engine does not have it."""
+    client = from_env()
+    if not _has_image(client, IMAGE):
+        client.images.pull(IMAGE)
+
+
 async def image_identity(adapter: DockerAdapter) -> str:
+    await asyncio.to_thread(ensure_image)
     return await adapter.image_id(IMAGE)
 
 
