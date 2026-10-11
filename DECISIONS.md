@@ -217,3 +217,31 @@ test can show it.
   read back with its hashes checked.
 - Test: `tests/unit/test_definitions_store.py` (traversal, links, stale and concurrent updates, failed
   writes, invalid definitions, the snapshot unaffected by a later edit, a changed snapshot refused).
+
+## D-015: Docker resources, labels, hardening, and image digests
+
+- Date: 2026-10-11 (task D1).
+- Decision: every network and container the controller creates carries four labels in the namespace
+  `dev.igs-iec104.mcp`: `managed=true`, `project`, `bench`, and `run`; a container also carries `instance`.
+  A resource belongs to an owner only when its labels match exactly, and every lookup, removal, and rollback
+  checks the labels again: a resource found by name alone is refused, never removed.
+- Names: a Docker name is `igsmcp-<first 12 hex digits of the run>-<part>`, where the part is the bench's
+  network name or the instance name. The name is checked against the name pattern and at most 63
+  characters. Ownership is decided by the labels, not by the name.
+- Hardening: a container spec has no field for a volume, a bind, a port, a privilege, the host network, or an
+  extra capability. Every container is created read-only, privileged false, with all capabilities dropped and
+  `no-new-privileges`. Its memory, CPUs, and processes are bounded by `Limits`.
+- Images: a container is created from the image identity (`sha256:...`), never from a tag. A repository
+  digest is resolved on the engine and checked against the image's repo digests; a tag is refused before any
+  call.
+- Idempotence and rollback: creating a resource that exists for the same owner finds it and creates nothing.
+  A creation block removes the resources it created, in reverse order, when it fails; a resource it found
+  already existing is kept. A failed removal is reported by name.
+- Threads: the Docker SDK is synchronous, so every call runs through `asyncio.to_thread`.
+- Dependency: the Docker SDK for Python (`docker`), approved at B1 (§11). The SDK ships no type hints, so mypy
+  treats its names as `Any` (`pyproject.toml`), and one import carries a typed ignore.
+- Tests: `tests/unit/test_docker_specs.py` (owner, labels, names, digests, the absence of mount and privilege
+  fields, limits); `tests/integration/test_docker_adapter.py` (against a real engine: create, list, remove;
+  hardening read back from the engine; an unlabelled resource with the same name is refused and kept; another
+  run's resources are kept; a failed creation is rolled back; the digest checks). The integration tests pull
+  one small image by its digest and fail in CI without an engine.

@@ -34,6 +34,12 @@ mypy_path = "src:tests/unit"
 module = ["jsonschema", "jsonschema.*"]
 ignore_missing_imports = true
 
+# docker ships no type stubs and no py.typed marker: its names are typed Any (the SDK is a
+# listed dependency, §11).
+[[tool.mypy.overrides]]
+module = ["docker", "docker.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests/unit"]
