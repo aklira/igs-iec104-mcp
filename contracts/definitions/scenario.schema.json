@@ -218,7 +218,7 @@
     },
     "Parallel": {
       "additionalProperties": false,
-      "description": "Runs branches of steps at the same time. Each branch is a list of steps, in \"\n\"order.",
+      "description": "Runs branches of steps at the same time. Each branch is a list of steps, in \"\n\"order. The step ends when every branch has ended: that is its barrier.",
       "properties": {
         "action": {
           "const": "parallel",
@@ -284,8 +284,22 @@
         },
         "fail_fast": {
           "default": true,
+          "description": "A branch step that does not pass stops the other branches.",
           "title": "Fail Fast",
           "type": "boolean"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The longest the barrier waits for the branches. Without it, the branches are bounded by their own deadlines and by the scenario's.",
+          "title": "Timeout"
         }
       },
       "required": [

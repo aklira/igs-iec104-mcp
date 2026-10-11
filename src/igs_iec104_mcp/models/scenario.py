@@ -175,11 +175,21 @@ class StartInstance(Definition):
 
 class Parallel(Definition):
     """Runs branches of steps at the same time. Each branch is a list of steps, in "
-    "order."""
+    "order. The step ends when every branch has ended: that is its barrier."""
 
     action: Literal["parallel"]
     branches: list[list[Step]] = Field(min_length=1)
-    fail_fast: StrictBool = True
+    fail_fast: StrictBool = Field(
+        default=True,
+        description="A branch step that does not pass stops the other branches.",
+    )
+    timeout: Timing | None = Field(
+        default=None,
+        description=(
+            "The longest the barrier waits for the branches. Without it, the branches "
+            "are bounded by their own deadlines and by the scenario's."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_branches(self) -> Parallel:

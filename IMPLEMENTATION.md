@@ -508,6 +508,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 **E4 — Parallel branches and barriers**
 - Depends: E1.
 - Done when: tests cover a barrier reached, a branch failure with fail-fast on and off, and a deadline during a barrier.
+- Done (D-029): the `parallel` step is the barrier; `timeout` bounds it; branch steps have labelled verdicts.
 
 **E5 — Restart and reconnect primitives**
 - Depends: D2, E1, U2.
@@ -605,7 +606,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E2 Assertions | [x] |
 | E2b Runtime-backed observation source | [x] |
 | E3 Cancellation and cleanup | [x] |
-| E4 Parallel branches and barriers | [ ] |
+| E4 Parallel branches and barriers | [x] |
 | E5 Restart and reconnect primitives | [ ] |
 | M1 MCP server over stdio | [ ] |
 | M2 Scenario and run tools | [ ] |

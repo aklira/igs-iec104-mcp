@@ -1,6 +1,7 @@
 """The scenario engine: the steps of a scenario in order, with an event cursor for each
 step, a deadline for each step and one for the whole scenario, fail-fast, cancellation,
-and the cleanup steps (IMPLEMENTATION.md §8 and §10; tasks E1, E2, and E3).
+parallel branches with barriers, and the cleanup steps (IMPLEMENTATION.md §8 and §10;
+tasks E1 to E4).
 
 The engine knows no protocol. A step is run by the handler of its action, which the
 caller supplies. A handler reads the runtimes through a `Source`: the events after a
@@ -15,6 +16,13 @@ run before the run ends, and the steps after it do not start. The cleanup steps 
 after success, failure, cancellation, and the global deadline, in order, whatever the
 fail-fast setting. A cleanup step cannot be cancelled, and it always has a deadline: its
 own, or `CLEANUP_SECONDS` when it has none.
+
+A parallel step runs its branches at the same time, each in order. Its verdict comes at
+the barrier, when every branch has ended. With fail-fast, a branch step that does not
+pass stops the other branches; without it, each branch runs to its end. A deadline of
+the barrier ends the branches still running. The labels of the verdicts give the
+position of each step: `step 2.1.3` is the third step of the first branch of the second
+step.
 """
 
 from __future__ import annotations
@@ -32,7 +40,12 @@ from igs_iec104_mcp.models.run import (
     RunStatus,
     Verdict,
 )
-from igs_iec104_mcp.models.scenario import DEFAULT_TIMEOUT, Scenario, Step
+from igs_iec104_mcp.models.scenario import (
+    DEFAULT_TIMEOUT,
+    Parallel,
+    Scenario,
+    Step,
+)
 
 POLL_SECONDS = 0.05
 # The deadline of a cleanup step that names none: the default step timeout (D-027).
@@ -95,7 +108,7 @@ class Context:
     after it, and the point image.
 
     A handler may leave a note about its last check; the engine adds the note to the
-    verdict when the step's deadline passes first.
+    verdict when the step's deadline passes first. Each step has its own context.
     """
 
     def __init__(self, source: Source) -> None:
@@ -169,14 +182,25 @@ class Result:
 
 @dataclass
 class _Ledger:
-    """What a run has done so far: its verdicts, the step in progress, and its end."""
+    """What a run has done so far: its verdicts, the steps in progress by label, the
+    top-level steps it has completed, and how it ended."""
 
     verdicts: list[Verdict] = field(default_factory=list)
+    open: dict[str, Step] = field(default_factory=dict)
     completed: int = 0
-    current: tuple[int, Step] | None = None
+    in_step: bool = False
     reason: str = ""
     global_deadline: bool = False
     cancelled: bool = False
+
+
+@dataclass(frozen=True)
+class _Env:
+    """What the steps of a run share: the source, the handlers, and the ledger."""
+
+    source: Source
+    handlers: Mapping[str, Handler]
+    ledger: _Ledger
 
 
 async def execute(
@@ -194,27 +218,19 @@ async def execute(
     """
     machine = RunMachine()
     machine.move(RunStatus.RUNNING)
-    context = Context(source)
-    ledger = _Ledger()
+    env = _Env(source, handlers, _Ledger())
+    ledger = env.ledger
     try:
         async with asyncio.timeout(_seconds(scenario.global_timeout)):
-            await _steps(scenario, handlers, context, cancel, ledger)
+            await _steps(scenario, env, cancel)
     except TimeoutError:
         ledger.global_deadline = True
         ledger.reason = "the scenario's global deadline passed"
-        if ledger.current is not None:
-            index, step = ledger.current
-            ledger.current = None
+        _end_open(ledger, None, f"{ledger.reason} during this step")
+        if ledger.in_step:
+            ledger.in_step = False
             ledger.completed += 1
-            ledger.verdicts.append(
-                _verdict(
-                    f"step {index + 1}",
-                    step,
-                    Outcome.TIMED_OUT,
-                    f"{ledger.reason} during this step",
-                )
-            )
-    await _cleanup(scenario, handlers, context, ledger)
+    await _cleanup(scenario, env)
     status = _status(
         ledger.verdicts,
         global_deadline=ledger.global_deadline,
@@ -229,24 +245,18 @@ async def execute(
     )
 
 
-async def _steps(
-    scenario: Scenario,
-    handlers: Mapping[str, Handler],
-    context: Context,
-    cancel: asyncio.Event | None,
-    ledger: _Ledger,
-) -> None:
+async def _steps(scenario: Scenario, env: _Env, cancel: asyncio.Event | None) -> None:
     """Runs the steps in order, until one of them ends the run."""
+    ledger = env.ledger
     for index, step in enumerate(scenario.steps):
         if cancel is not None and cancel.is_set():
             ledger.cancelled = True
             ledger.reason = f"cancelled before step {index + 1}"
             return
-        ledger.current = (index, step)
-        outcome, detail = await _run_step(step, handlers, context, cancel)
-        ledger.current = None
+        ledger.in_step = True
+        outcome = await _execute(step, f"step {index + 1}", env, cancel)
+        ledger.in_step = False
         ledger.completed += 1
-        ledger.verdicts.append(_verdict(f"step {index + 1}", step, outcome, detail))
         if outcome is Outcome.CANCELLED:
             ledger.cancelled = True
             ledger.reason = f"cancelled during step {index + 1}"
@@ -256,36 +266,51 @@ async def _steps(
             return
 
 
-async def _cleanup(
-    scenario: Scenario,
-    handlers: Mapping[str, Handler],
-    context: Context,
-    ledger: _Ledger,
-) -> None:
+async def _cleanup(scenario: Scenario, env: _Env) -> None:
     """Runs every cleanup step, in order, whatever the run did so far. A cleanup step is
     not cancelled, and it has a deadline of its own."""
-    for index, step in enumerate(scenario.cleanup):
-        outcome, detail = await _run_step(
-            step, handlers, context, None, default_limit=CLEANUP_SECONDS
+    for index, step in enumerate(scenario.cleanup, start=1):
+        await _execute(
+            step, f"cleanup {index}", env, None, default_limit=CLEANUP_SECONDS
         )
-        ledger.verdicts.append(_verdict(f"cleanup {index + 1}", step, outcome, detail))
+
+
+async def _execute(
+    step: Step,
+    label: str,
+    env: _Env,
+    cancel: asyncio.Event | None,
+    *,
+    default_limit: float | None = None,
+) -> Outcome:
+    """Runs one step under its label, and records its verdict when it ends.
+
+    A step that does not end, because the global deadline cancels its task, stays open
+    under its label, so that the deadline can record it.
+    """
+    env.ledger.open[label] = step
+    if isinstance(step, Parallel):
+        outcome, detail = await _parallel(step, label, env, cancel, default_limit)
+    else:
+        outcome, detail = await _run_step(step, env, cancel, default_limit)
+    env.ledger.open.pop(label, None)
+    env.ledger.verdicts.append(_verdict(label, step, outcome, detail))
+    return outcome
 
 
 async def _run_step(
     step: Step,
-    handlers: Mapping[str, Handler],
-    context: Context,
+    env: _Env,
     cancel: asyncio.Event | None,
-    *,
-    default_limit: float | None = None,
+    default_limit: float | None,
 ) -> tuple[Outcome, str]:
-    handler = handlers.get(step.action)
+    handler = env.handlers.get(step.action)
     if handler is None:
         return Outcome.UNSUPPORTED, f"the engine has no handler for {step.action!r}"
     limit = _seconds(getattr(step, "timeout", None))
     if limit is None:
         limit = default_limit
-    context.note = None
+    context = Context(env.source)
     try:
         async with asyncio.timeout(limit):
             detail = await _until_cancelled(handler(step, context), cancel)
@@ -301,6 +326,109 @@ async def _run_step(
     except Exception as error:
         return Outcome.ERROR, f"{type(error).__name__}: {error}"
     return Outcome.PASSED, detail
+
+
+async def _parallel(
+    step: Parallel,
+    label: str,
+    env: _Env,
+    cancel: asyncio.Event | None,
+    default_limit: float | None,
+) -> tuple[Outcome, str]:
+    """Runs the branches at the same time, and waits at the barrier for all of them.
+
+    The branches stop together when `halt` is set: by a branch that failed under
+    fail-fast, or by the run's cancellation (through `_relay`).
+    """
+    halt = asyncio.Event()
+    failed: list[str] = []
+    relay = None if cancel is None else asyncio.ensure_future(_relay(cancel, halt))
+    tasks = [
+        asyncio.ensure_future(
+            _branch(steps, f"{label}.{number}", env, halt, failed, step.fail_fast)
+        )
+        for number, steps in enumerate(step.branches, start=1)
+    ]
+    limit = _seconds(step.timeout)
+    if limit is None:
+        limit = default_limit
+    try:
+        async with asyncio.timeout(limit):
+            # `wait`, not `gather`: a gather cancels its branches when the barrier's
+            # deadline passes, and answers only once they have all ended, which would
+            # hide the branches still running when the deadline passed.
+            await asyncio.wait(tasks)
+    except TimeoutError:
+        running = sum(1 for task in tasks if not task.done())
+        await _stop(tasks)
+        _end_open(
+            env.ledger, f"{label}.", "the barrier's deadline passed during this step"
+        )
+        return (
+            Outcome.TIMED_OUT,
+            f"{_no_result(limit)}: {running} of {len(tasks)} branches still running",
+        )
+    finally:
+        if relay is not None:
+            relay.cancel()
+        for task in tasks:
+            task.cancel()
+    if cancel is not None and cancel.is_set():
+        return Outcome.CANCELLED, "cancelled while the branches ran"
+    if failed:
+        stopped = "; the other branches were stopped" if halt.is_set() else ""
+        return Outcome.FAILED, f"did not pass: {', '.join(failed)}{stopped}"
+    return Outcome.PASSED, f"all {len(tasks)} branches passed"
+
+
+async def _branch(
+    steps: list[Step],
+    prefix: str,
+    env: _Env,
+    halt: asyncio.Event,
+    failed: list[str],
+    fail_fast: bool,
+) -> None:
+    """Runs the steps of one branch in order.
+
+    The branch ends when it is halted, when one of its steps is cancelled, or when a
+    step does not pass under fail-fast.
+    """
+    for index, step in enumerate(steps, start=1):
+        if halt.is_set():
+            return
+        label = f"{prefix}.{index}"
+        outcome = await _execute(step, label, env, halt)
+        if outcome is Outcome.CANCELLED:
+            return
+        if outcome is not Outcome.PASSED:
+            failed.append(label)
+            if fail_fast:
+                halt.set()
+                return
+
+
+async def _relay(cancel: asyncio.Event, halt: asyncio.Event) -> None:
+    """Halts the branches when the run is cancelled."""
+    await cancel.wait()
+    halt.set()
+
+
+async def _stop(tasks: list[asyncio.Task[None]]) -> None:
+    """Cancels the branches still running, and waits until each one has ended."""
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _end_open(ledger: _Ledger, prefix: str | None, detail: str) -> None:
+    """Records a TIMED_OUT verdict for each step still open under the prefix, or for all
+    of them when there is no prefix."""
+    for label in [
+        label for label in ledger.open if prefix is None or label.startswith(prefix)
+    ]:
+        step = ledger.open.pop(label)
+        ledger.verdicts.append(_verdict(label, step, Outcome.TIMED_OUT, detail))
 
 
 async def _until_cancelled(
@@ -339,8 +467,8 @@ def _seconds(value: str | None) -> float | None:
     return None if value is None else duration_seconds(value)
 
 
-def _verdict(where: str, step: Step, outcome: Outcome, detail: str) -> Verdict:
-    return Verdict(step=f"{where}: {step.action}", outcome=outcome, detail=detail)
+def _verdict(label: str, step: Step, outcome: Outcome, detail: str) -> Verdict:
+    return Verdict(step=f"{label}: {step.action}", outcome=outcome, detail=detail)
 
 
 def _status(

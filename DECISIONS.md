@@ -523,3 +523,31 @@ test can show it.
   scenario with an expectation of a spontaneous update; a wrong value times out and says what arrived; the image
   reports a wrong value and a wrong cause); `tests/integration/test_contract.py` (the events of a client include a
   `point`).
+
+## D-029: Parallel branches and barriers (E4)
+
+- Date: 2026-10-11 (task E4).
+- Decision: a `parallel` step runs its branches at the same time, each in order. The step is its barrier: its
+  verdict comes when every branch has ended. A branch step gets its own verdict as it ends, labelled by its
+  position: `step 2.1.3` is the third step of the first branch of the second step (nested parallels extend the
+  label, and cleanup steps use `cleanup k`).
+- Fail-fast (the step's `fail_fast`, true by default): a branch step that does not pass halts the other branches.
+  Their steps in progress end CANCELLED, and the steps not yet started have no verdict. Without fail-fast, each
+  branch runs to its end. The barrier's verdict is PASSED when every branch step passed, and FAILED otherwise,
+  naming the steps that did not pass (and saying when the other branches were stopped).
+- Barrier deadline: `Parallel` gains an optional `timeout` (the schema is regenerated). When it passes, the
+  branches still running are cancelled and awaited; each of their steps in progress gets TIMED_OUT ("the barrier's
+  deadline passed during this step"), and the barrier gets TIMED_OUT ("no result within N s: k of m branches still
+  running"). Without a `timeout`, the branches are bounded by their own step deadlines and by the scenario's.
+- Cancellation: the run's cancel event halts every branch, and the barrier ends CANCELLED.
+- Global deadline: every step still open is recorded TIMED_OUT, whether it is top-level, in a branch, or a barrier.
+- Each step has its own `Context`, so a note left by one branch cannot reach the verdict of another.
+- Implementation: the barrier waits with `asyncio.wait`, not `gather`. A `gather` answers a cancellation only
+  after all its children have ended, which would hide the branches still running when the barrier's deadline
+  passed (found by the deadline test).
+- Not in E4: the restart and reconnect actions (E5); a parallel step in the cleanup is run, but no scenario uses one
+  there yet.
+- Tests: `tests/unit/test_scenario_parallel.py` (the barrier waits for every branch, and the branches start
+  together; a failed branch step under fail-fast stops the others; without fail-fast every branch runs to its end;
+  a deadline during the barrier; the global deadline during the branches; a cancellation during the branches; a
+  parallel step inside a branch has its own barrier). The engine tests are unchanged and pass.
