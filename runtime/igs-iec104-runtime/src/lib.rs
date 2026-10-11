@@ -15,6 +15,8 @@ pub mod image;
 pub mod points;
 pub mod runtime;
 pub mod server_role;
+pub mod simulate;
+pub mod station_log;
 pub mod token;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -26,7 +28,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The version of the control API and event contract (`contracts/`). It changes with an incompatible
 /// change of either file.
-pub const CONTRACT_VERSION: &str = "1.1.0";
+pub const CONTRACT_VERSION: &str = "1.2.0";
 
 /// The identity line of the runtime: its name, version, and the protocol port of the library.
 pub fn banner() -> String {

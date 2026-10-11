@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: igs-iec104-runtime control API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     The control API of one runtime, used by the controller only (IMPLEMENTATION.md §3). A runtime runs as a client of one station or as a station. Every route needs the control token. A request to the client is acknowledged when it is queued (202), with its identity; its outcome comes as events, and as its request record. The events are described by events.schema.json, which carries the same contract version.
 servers:
@@ -235,6 +235,30 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/WrongRole'
+  /v1/station/events:
+    get:
+      operationId: stationEvents
+      summary: 'The events of the station after a sequence number: its connections, their transfers, and the commands it judged.'
+      parameters:
+      - name: after
+        in: query
+        required: false
+        description: Zero, or the last sequence number the reader has seen.
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      responses:
+        '200':
+          description: The events kept after the number.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StationEventsBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/WrongRole'
 components:
   securitySchemes:
     ControlToken:
@@ -354,7 +378,7 @@ components:
     ContractVersion:
       type: string
       description: The version of this contract, the same as the version of events.schema.json.
-      const: 1.1.0
+      const: 1.2.0
     Accepted:
       type: object
       additionalProperties: false
@@ -638,3 +662,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ImagePoint'
+    StationEventsBody:
+      type: object
+      additionalProperties: false
+      required:
+      - events
+      - first_seq
+      - last_seq
+      - dropped
+      properties:
+        events:
+          type: array
+          items:
+            $ref: station-events.schema.json#/$defs/StationEvent
+        first_seq:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+          description: The oldest sequence number kept, or null when none is kept.
+        last_seq:
+          type: integer
+          minimum: 0
+        dropped:
+          type: integer
+          minimum: 0
+          description: "The events lost: those the station's queues dropped, and those the log evicted."

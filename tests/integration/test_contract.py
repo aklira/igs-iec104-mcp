@@ -154,6 +154,9 @@ async def check_station(
     check(contract, "/v1/events", "get", status, body)
     assert status == 409, "a station keeps no client events"
 
+    status, body, _ = await call(s, "GET", "/v1/station/events")
+    check(contract, "/v1/station/events", "get", status, body)
+
     status, body, headers = await call(anonymous, "GET", "/v1/ready")
     check(contract, "/v1/ready", "get", status, body)
     assert status == 401

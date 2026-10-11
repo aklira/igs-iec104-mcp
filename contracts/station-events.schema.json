@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "igs-iec104-runtime station events",
+  "description": "An event of the station role, as the control API reports it (GET /v1/station/events): its connections, the state of their data transfer, and the commands it judged. Versioned with runtime-api.yaml.",
+  "$comment": "contract version 1.2.0",
+  "$ref": "#/$defs/StationEvent",
+  "$defs": {
+    "StationEvent": {
+      "description": "One recorded event: its kind selects the fields that follow it.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Connected"
+        },
+        {
+          "$ref": "#/$defs/Transfer"
+        },
+        {
+          "$ref": "#/$defs/Superseded"
+        },
+        {
+          "$ref": "#/$defs/Closed"
+        },
+        {
+          "$ref": "#/$defs/Command"
+        }
+      ]
+    },
+    "Connected": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "connection",
+        "peer"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "connected"
+        },
+        "connection": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The identity of the connection, the same in every event about it."
+        },
+        "peer": {
+          "type": "string",
+          "description": "The address of the controlling station."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Transfer": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "connection",
+        "state"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "transfer"
+        },
+        "connection": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The identity of the connection, the same in every event about it."
+        },
+        "state": {
+          "$ref": "events.schema.json#/$defs/TransferState"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Superseded": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "connection",
+        "by"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "superseded"
+        },
+        "connection": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The identity of the connection, the same in every event about it."
+        },
+        "by": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The connection that started its transfer, which closed this one."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Closed": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "connection",
+        "end",
+        "error"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "closed"
+        },
+        "connection": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The identity of the connection, the same in every event about it."
+        },
+        "end": {
+          "type": "string",
+          "enum": [
+            "station",
+            "transport",
+            "forced"
+          ],
+          "description": "station: the station closed it; transport: the transport ended, with the error; forced: the station closed it at the end of its grace period."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Command": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "address",
+        "command",
+        "select",
+        "accepted"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "command"
+        },
+        "address": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777215
+        },
+        "command": {
+          "type": "string",
+          "enum": [
+            "single",
+            "double",
+            "step",
+            "normalized",
+            "scaled",
+            "float"
+          ]
+        },
+        "select": {
+          "type": "boolean",
+          "description": "True for a select, false for an execution."
+        },
+        "accepted": {
+          "type": "boolean",
+          "description": "Whether the station confirmed the command."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

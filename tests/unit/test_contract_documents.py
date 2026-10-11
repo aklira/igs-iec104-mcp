@@ -10,6 +10,7 @@ from openapi_spec_validator import validate
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 API_FILE = "runtime-api.yaml"
 EVENTS_FILE = "events.schema.json"
+STATION_EVENTS_FILE = "station-events.schema.json"
 
 
 def test_the_openapi_document_is_valid(contract: Any) -> None:
@@ -19,6 +20,16 @@ def test_the_openapi_document_is_valid(contract: Any) -> None:
 
 def test_the_events_schema_is_valid(contract: Any) -> None:
     Draft202012Validator.check_schema(contract.events)
+
+
+def test_the_station_events_schema_is_valid_and_names_the_version(
+    contract: Any,
+) -> None:
+    station = json.loads((CONTRACTS / STATION_EVENTS_FILE).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(station)
+    version = contract.api["info"]["version"]
+    assert f"contract version {version}" in station["$comment"]
+    assert len(station["$defs"]["StationEvent"]["oneOf"]) == 5
 
 
 def test_both_documents_name_the_same_contract_version(contract: Any) -> None:

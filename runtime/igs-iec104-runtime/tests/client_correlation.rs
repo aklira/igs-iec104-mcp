@@ -104,7 +104,7 @@ async fn silent_station(close: oneshot::Receiver<()>) -> SocketAddr {
 struct Client {
     control: SocketAddr,
     stop: oneshot::Sender<()>,
-    serving: JoinHandle<std::io::Result<()>>,
+    serving: JoinHandle<std::io::Result<igs_iec104_runtime::runtime::Stopped>>,
 }
 
 impl Client {

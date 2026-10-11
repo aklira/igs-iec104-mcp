@@ -70,7 +70,7 @@ async fn run(config: Config) -> ExitCode {
     });
     println!("{addresses}");
     match runtime.serve(stop_requested()).await {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(%error, "the control API stopped with an error");
             ExitCode::FAILURE

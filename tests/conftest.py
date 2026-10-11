@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 API_FILE = "runtime-api.yaml"
 EVENTS_FILE = "events.schema.json"
+STATION_EVENTS_FILE = "station-events.schema.json"
 
 
 @dataclass(frozen=True)
@@ -71,12 +72,21 @@ def contract() -> Contract:
     api_text = (CONTRACTS / API_FILE).read_text(encoding="utf-8")
     api = YAML(typ="safe").load(api_text)
     events = json.loads((CONTRACTS / EVENTS_FILE).read_text(encoding="utf-8"))
+    station_events = json.loads(
+        (CONTRACTS / STATION_EVENTS_FILE).read_text(encoding="utf-8")
+    )
     registry = Registry().with_resources(
         [
             (API_FILE, Resource.from_contents(api, default_specification=DRAFT202012)),
             (
                 EVENTS_FILE,
                 Resource.from_contents(events, default_specification=DRAFT202012),
+            ),
+            (
+                STATION_EVENTS_FILE,
+                Resource.from_contents(
+                    station_events, default_specification=DRAFT202012
+                ),
             ),
         ]
     )

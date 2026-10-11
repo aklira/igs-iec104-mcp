@@ -8,19 +8,23 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use igs_iec104::server::{Server, ServerHandle};
+use igs_iec104::server::{ServerEvent, ServerEvents, ServerHandle, ShutdownReport};
 use igs_iec104::Client;
 use igs_iec104_codec::header::CommonAddress;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 
-use crate::client_role::{self, Recorder, Request};
-use crate::config::{Config, Role};
+use crate::client_role::{self, transfer_name_of, Recorder, Request};
+use crate::config::{Config, Role, DEFAULT_EVENT_CAPACITY};
 use crate::points::{self, PointError, PointSpec};
-use crate::server_role::{self, Refuse, StationError};
+use crate::server_role::{self, CommandRecord, Policy, StationError, StationSettings};
+use crate::station_log::{StationEventKind, StationLog};
 use crate::token::{ControlToken, TokenError};
 
 /// Requests waiting for the client. A full queue makes a request wait for its turn.
@@ -58,6 +62,26 @@ pub struct ServerLink {
     pub listen: SocketAddr,
     /// The points, by address, as they were configured.
     pub points: BTreeMap<u32, PointSpec>,
+    /// The events of the station: its connections, and the commands it judged.
+    pub log: Arc<Mutex<StationLog>>,
+}
+
+/// What a station's serving reports when it has stopped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stopped {
+    /// What the station did when it stopped: the connections it had, those it closed by force, and
+    /// the events it still held (task U1). `None` for a client.
+    pub station: Option<ShutdownReport>,
+}
+
+/// The parts of a station that run beside it: its connection events, the commands it judged, and its
+/// simulations.
+struct StationParts {
+    server: igs_iec104::server::Server<Policy>,
+    events: ServerEvents,
+    commands: mpsc::Receiver<CommandRecord>,
+    lost_commands: Arc<AtomicU64>,
+    simulations: Vec<JoinHandle<()>>,
 }
 
 /// What the role runs, until the runtime serves.
@@ -69,7 +93,8 @@ enum Engine {
         common_address: CommonAddress,
     },
     Server {
-        server: Server<Refuse>,
+        parts: StationParts,
+        log: Arc<Mutex<StationLog>>,
     },
 }
 
@@ -133,20 +158,40 @@ impl Runtime {
                 };
                 (engine, Some(link), None)
             }
-            Role::Server { listen, points } => {
+            Role::Server {
+                listen,
+                points,
+                selection_timeout,
+            } => {
                 let points = points::load(&points).map_err(BindError::Points)?;
-                let station = server_role::bind(listen, config.common_address, points)
+                let settings = StationSettings {
+                    common_address: config.common_address,
+                    event_capacity: NonZeroUsize::new(config.event_capacity)
+                        .unwrap_or(NonZeroUsize::MIN),
+                    selection_timeout,
+                };
+                let station = server_role::bind(listen, settings, points)
                     .await
                     .map_err(BindError::Station)?;
+                // The log keeps at least the default, so that a small stream queue loses events
+                // before the log does, and the loss is what the stream counted.
+                let log = Arc::new(Mutex::new(StationLog::new(
+                    config.event_capacity.max(DEFAULT_EVENT_CAPACITY),
+                )));
                 let link = ServerLink {
                     handle: station.handle,
                     listen: station.listen,
                     points: station.points,
+                    log: Arc::clone(&log),
                 };
-                let engine = Engine::Server {
+                let parts = StationParts {
                     server: station.server,
+                    events: station.events,
+                    commands: station.commands,
+                    lost_commands: station.lost_commands,
+                    simulations: station.simulations,
                 };
-                (engine, None, Some(link))
+                (Engine::Server { parts, log }, None, Some(link))
             }
         };
         Ok(Self {
@@ -172,8 +217,9 @@ impl Runtime {
     }
 
     /// Serves the control API and runs the role until `shutdown` completes. The role stops
-    /// with the control API: a station stops in order (task U1), and a client is dropped.
-    pub async fn serve<F>(self, shutdown: F) -> io::Result<()>
+    /// with the control API: a station stops in order (task U1), and a client is dropped. The
+    /// report of the stop comes back with the result.
+    pub async fn serve<F>(self, shutdown: F) -> io::Result<Stopped>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -198,9 +244,16 @@ impl Runtime {
                     .with_graceful_shutdown(shutdown)
                     .await;
                 owner.abort();
-                served
+                served.map(|()| Stopped::default())
             }
-            Engine::Server { server } => {
+            Engine::Server { parts, log } => {
+                let StationParts {
+                    server,
+                    events,
+                    commands,
+                    lost_commands,
+                    simulations,
+                } = parts;
                 let (stop, stopped) = oneshot::channel::<()>();
                 let station = tokio::spawn(server.run_until(
                     async {
@@ -208,15 +261,88 @@ impl Runtime {
                     },
                     STATION_GRACE,
                 ));
+                let recording = tokio::spawn(record_station(events, commands, lost_commands, log));
                 let served = axum::serve(control, crate::api::router(shared))
                     .with_graceful_shutdown(shutdown)
                     .await;
                 let _ = stop.send(());
-                match station.await {
-                    Ok(report) => tracing::info!(?report, "the station stopped"),
-                    Err(error) => tracing::error!(%error, "the station task failed"),
+                let report = match station.await {
+                    Ok(report) => {
+                        tracing::info!(?report, "the station stopped");
+                        Some(report)
+                    }
+                    Err(error) => {
+                        tracing::error!(%error, "the station task failed");
+                        None
+                    }
+                };
+                recording.abort();
+                for simulation in simulations {
+                    simulation.abort();
                 }
-                served
+                served.map(|()| Stopped { station: report })
+            }
+        }
+    }
+}
+
+/// Records the connection events of the station and the commands it judged, in its log, and keeps
+/// the count of the events it lost. It runs until it is aborted with the station.
+async fn record_station(
+    mut events: ServerEvents,
+    mut commands: mpsc::Receiver<CommandRecord>,
+    lost_commands: Arc<AtomicU64>,
+    log: Arc<Mutex<StationLog>>,
+) {
+    let mut sync = tokio::time::interval(Duration::from_millis(50));
+    loop {
+        tokio::select! {
+            Some(event) = events.next() => {
+                crate::lock(&log).record(station_kind(&event));
+            }
+            Some(record) = commands.recv() => {
+                crate::lock(&log).record(StationEventKind::Command {
+                    address: record.address,
+                    command: record.command,
+                    select: record.select,
+                    accepted: record.accepted,
+                });
+            }
+            _ = sync.tick() => {
+                let lost = events.dropped() + lost_commands.load(Ordering::Relaxed);
+                crate::lock(&log).set_lost(lost);
+            }
+        }
+    }
+}
+
+/// The log's view of a connection event of the station.
+fn station_kind(event: &ServerEvent) -> StationEventKind {
+    match event {
+        ServerEvent::Connected { id, peer } => StationEventKind::Connected {
+            connection: *id,
+            peer: peer.to_string(),
+        },
+        ServerEvent::Transfer { id, state } => StationEventKind::Transfer {
+            connection: *id,
+            state: transfer_name_of(*state),
+        },
+        ServerEvent::Superseded { id, by } => StationEventKind::Superseded {
+            connection: *id,
+            by: *by,
+        },
+        ServerEvent::Closed { id, end } => {
+            let (end, error) = match end {
+                igs_iec104::server::ConnectionEnd::Station => ("station", None),
+                igs_iec104::server::ConnectionEnd::Transport(error) => {
+                    ("transport", Some(error.to_string()))
+                }
+                igs_iec104::server::ConnectionEnd::Forced => ("forced", None),
+            };
+            StationEventKind::Closed {
+                connection: *id,
+                end,
+                error,
             }
         }
     }

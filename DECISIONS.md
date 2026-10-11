@@ -154,3 +154,23 @@ test can show it.
   `src/image.rs` (decoding), and `tests/client_correlation.rs` (against the upstream station and a silent
   peer). `not_sent` is reached end to end only through a race the test cannot force; its rule is tested
   in `correlation`.
+
+## D-012: Station commands, simulation, station events, and the stop report (contract 1.2.0)
+
+- Date: 2026-10-11 (task C3).
+- Decision: each point of the station has a command policy (`unknown_address` by default, `refuse`, or
+  `accept` for a single or double point). A command is judged by the policy of its point; an accepted
+  command is confirmed, and the point keeps its value (the controller updates it). Each judgement is
+  queued without waiting, and recorded in the station's event log. A point may change by itself
+  (`simulation`): toggle, ramp, or a seeded walk, each step a function of the step number and the seed,
+  published at the period. The station reports its connections on `GET /v1/station/events`, with the
+  events the library reports (connected, transfer, superseded, closed with its end), and the commands,
+  and it reports the events it lost. The selection time-out is a setting of the station, 30 seconds by
+  default. The stop returns the library's report: the connections open at the stop, those closed by force,
+  and the events still held.
+- Contract 1.2.0 (additive): `contracts/station-events.schema.json` and `GET /v1/station/events`.
+  Connection identities start at zero, as the library numbers them.
+- Test: `src/simulate.rs` (the sequences, the wrap-around, the seed, and a driver test with a paused
+  clock), `src/points.rs` (the validation of the policy and the simulation), `src/station_log.rs`, and
+  `tests/station.rs` (the policy and the log, the selection time-out, the connection events, the stop
+  report, and the losses), with `tests/contract.rs` for the station events.

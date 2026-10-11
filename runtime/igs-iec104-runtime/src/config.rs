@@ -3,11 +3,15 @@
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// The control address when none is given: loopback, on a port the runtime chooses (§6).
 pub const DEFAULT_CONTROL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
 /// The number of events kept for the control API before the oldest are dropped.
 pub const DEFAULT_EVENT_CAPACITY: usize = 1024;
+/// The selection time-out of a station, in milliseconds, by default and at most.
+pub const DEFAULT_SELECTION_TIMEOUT_MS: u64 = 30_000;
+const MAX_SELECTION_TIMEOUT_MS: u64 = 600_000;
 /// The largest number of events the runtime keeps.
 const MAX_EVENT_CAPACITY: usize = 1_000_000;
 /// The largest common address of a station: 65535 is the global address, which a station refuses.
@@ -28,6 +32,9 @@ pub enum Role {
         listen: SocketAddr,
         /// The points file (see `points`).
         points: PathBuf,
+        /// How long a selection waits for its execution (IEC 60870-5-104 §7.7 and §8.9: the station
+        /// keeps a selection for a time-out). 30 seconds by default.
+        selection_timeout: Duration,
     },
 }
 
@@ -115,6 +122,7 @@ pub const USAGE: &str =
   --common-address N        the common address of the station, 1 to 65534 (default 1)
   --control ADDRESS         the address of the control API (default 127.0.0.1:0)
   --event-capacity N        the events kept for the control API (default 1024)
+  --selection-timeout-ms N  how long a station keeps a selection (default 30000)
   --control-token-file FILE the file with the control token, required
   -h, --help                print this usage
 
@@ -136,6 +144,7 @@ where
     let mut common_address = 1;
     let mut control = DEFAULT_CONTROL;
     let mut event_capacity = DEFAULT_EVENT_CAPACITY;
+    let mut selection_timeout_ms = DEFAULT_SELECTION_TIMEOUT_MS;
     let mut control_token = None;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -155,6 +164,14 @@ where
             "--event-capacity" => {
                 let text = value("--event-capacity", &mut arguments)?;
                 event_capacity = number("--event-capacity", &text, 1..=MAX_EVENT_CAPACITY)?;
+            }
+            "--selection-timeout-ms" => {
+                let text = value("--selection-timeout-ms", &mut arguments)?;
+                selection_timeout_ms = number(
+                    "--selection-timeout-ms",
+                    &text,
+                    1..=MAX_SELECTION_TIMEOUT_MS,
+                )?;
             }
             "--control-token-file" => {
                 control_token = Some(PathBuf::from(value(
@@ -178,6 +195,7 @@ where
         (None, Some(listen)) => Role::Server {
             listen,
             points: points.ok_or(ConfigError::MissingPoints)?,
+            selection_timeout: Duration::from_millis(selection_timeout_ms),
         },
     };
     let control_token = control_token.ok_or(ConfigError::MissingToken)?;
@@ -288,6 +306,7 @@ mod tests {
             Role::Server {
                 listen: "127.0.0.1:0".parse().expect("address"),
                 points: PathBuf::from("points.json"),
+                selection_timeout: Duration::from_millis(DEFAULT_SELECTION_TIMEOUT_MS),
             }
         );
     }

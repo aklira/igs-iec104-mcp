@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use igs_iec104_runtime::events::{AsduView, EventKind, EventLog};
+use igs_iec104_runtime::station_log::{StationEventKind, StationLog};
 use serde_json::{json, Value};
 
 fn schema() -> Value {
@@ -81,8 +82,9 @@ fn definition_of(kind: &str) -> Option<&'static str> {
 /// Checks a value against a schema fragment, resolving `$ref` into the schema's `$defs`.
 fn check(schema: &Value, fragment: &Value, value: &Value) -> Result<(), String> {
     if let Some(pointer) = fragment.get("$ref").and_then(Value::as_str) {
-        let name = pointer
-            .strip_prefix("#/$defs/")
+        // A reference to a definition, in this file or in another one: the part after `#/$defs/`.
+        let (_, name) = pointer
+            .rsplit_once("#/$defs/")
             .ok_or_else(|| format!("unsupported reference {pointer}"))?;
         return check(schema, &schema["$defs"][name], value);
     }
@@ -245,4 +247,106 @@ fn the_checker_refuses_an_event_outside_the_contract() {
             "the checker must refuse {event}"
         );
     }
+}
+
+/// The schema of the station's events, with the transfer states of the client's schema, which the
+/// station's schema refers to.
+fn station_schema() -> Value {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../contracts");
+    let text = std::fs::read_to_string(dir.join("station-events.schema.json"))
+        .expect("the station events schema is read");
+    let mut schema: Value = serde_json::from_str(&text).expect("the station events schema is JSON");
+    schema["$defs"]["TransferState"] = schema_of_events()["$defs"]["TransferState"].clone();
+    schema
+}
+
+fn schema_of_events() -> Value {
+    schema()
+}
+
+/// The definition of a kind of station event in the schema.
+fn station_definition_of(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "connected" => "Connected",
+        "transfer" => "Transfer",
+        "superseded" => "Superseded",
+        "closed" => "Closed",
+        "command" => "Command",
+        _ => return None,
+    })
+}
+
+/// One event of each kind the station records.
+fn station_samples() -> Vec<StationEventKind> {
+    vec![
+        StationEventKind::Connected {
+            connection: 1,
+            peer: "127.0.0.1:50000".to_owned(),
+        },
+        StationEventKind::Transfer {
+            connection: 1,
+            state: "started",
+        },
+        StationEventKind::Superseded {
+            connection: 1,
+            by: 2,
+        },
+        StationEventKind::Closed {
+            connection: 1,
+            end: "transport",
+            error: Some("the peer closed the stream".to_owned()),
+        },
+        StationEventKind::Command {
+            address: 1,
+            command: "single",
+            select: true,
+            accepted: false,
+        },
+    ]
+}
+
+#[test]
+fn every_station_event_matches_the_station_schema() {
+    let schema = station_schema();
+    for kind in station_samples() {
+        let mut log = StationLog::new(4);
+        log.record(kind);
+        let recorded = log.after(0).pop().expect("the event is kept");
+        let event = serde_json::to_value(&recorded).expect("the event is JSON");
+        let name = event["kind"].as_str().expect("the event has a kind");
+        let definition = station_definition_of(name).expect("the kind is in the contract");
+        if let Err(error) = check(&schema, &schema["$defs"][definition], &event) {
+            panic!("{name} does not match its definition: {error}: {event}");
+        }
+    }
+}
+
+#[test]
+fn the_station_schema_describes_every_kind_the_station_records() {
+    let schema = station_schema();
+    let mut declared: Vec<&str> = schema["$defs"]["StationEvent"]["oneOf"]
+        .as_array()
+        .expect("the event is a choice of definitions")
+        .iter()
+        .map(|choice| {
+            choice["$ref"]
+                .as_str()
+                .unwrap_or_default()
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+        })
+        .collect();
+    declared.sort_unstable();
+    let mut sampled: Vec<&str> = station_samples()
+        .into_iter()
+        .map(|kind| {
+            let mut log = StationLog::new(1);
+            log.record(kind);
+            let event = serde_json::to_value(log.after(0).pop().expect("kept")).expect("JSON");
+            station_definition_of(event["kind"].as_str().unwrap_or_default()).unwrap_or_default()
+        })
+        .collect();
+    sampled.sort_unstable();
+    assert_eq!(declared, sampled);
 }

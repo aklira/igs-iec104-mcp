@@ -50,7 +50,7 @@ struct Running {
     control: SocketAddr,
     station: SocketAddr,
     stop: oneshot::Sender<()>,
-    serving: JoinHandle<std::io::Result<()>>,
+    serving: JoinHandle<std::io::Result<igs_iec104_runtime::runtime::Stopped>>,
 }
 
 impl Running {
@@ -60,6 +60,7 @@ impl Running {
             role: Role::Server {
                 listen: "127.0.0.1:0".parse().expect("address"),
                 points: points.0.clone(),
+                selection_timeout: std::time::Duration::from_secs(30),
             },
             common_address: 1,
             control: DEFAULT_CONTROL,

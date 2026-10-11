@@ -28,6 +28,7 @@ use crate::image::Point;
 use crate::lock;
 use crate::points::{self, PointSpec};
 use crate::runtime::{ClientLink, ServerLink, Shared};
+use crate::station_log::StationRecorded;
 use igs_iec104_codec::formats::Cp56Time2a;
 use std::time::Duration;
 
@@ -43,6 +44,7 @@ pub fn router(shared: Arc<Shared>) -> Router {
         .route("/v1/image/points", get(image_points))
         .route("/v1/events", get(events))
         .route("/v1/points", get(list_points))
+        .route("/v1/station/events", get(station_events))
         .route("/v1/points/{address}", get(get_point).post(update_point))
         // A layer, not a route layer: a request without the token is refused before the router
         // decides whether the path exists.
@@ -422,4 +424,40 @@ async fn update_point(
 fn no_point(address: u32) -> Response {
     let body = json!({"error": format!("no point at address {address}")});
     (StatusCode::NOT_FOUND, Json(body)).into_response()
+}
+
+/// The query of the station's events: those after `after`.
+#[derive(Deserialize)]
+struct StationEventsQuery {
+    #[serde(default)]
+    after: u64,
+}
+
+/// The station's events after the requested number, and what the reader needs to detect a gap.
+#[derive(Serialize)]
+struct StationEventsBody {
+    events: Vec<StationRecorded>,
+    /// The oldest sequence number kept, or `null` when none is kept.
+    first_seq: Option<u64>,
+    /// The last sequence number recorded.
+    last_seq: u64,
+    /// The events lost: those the station's queues dropped, and those the log evicted.
+    dropped: u64,
+}
+
+async fn station_events(
+    State(shared): State<Arc<Shared>>,
+    Query(query): Query<StationEventsQuery>,
+) -> Response {
+    let Some(station) = &shared.server else {
+        return wrong_role("station");
+    };
+    let log = lock(&station.log);
+    Json(StationEventsBody {
+        events: log.after(query.after),
+        first_seq: log.first_seq(),
+        last_seq: log.last_seq(),
+        dropped: log.dropped(),
+    })
+    .into_response()
 }

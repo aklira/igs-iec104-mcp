@@ -9,6 +9,12 @@
 //! Each point has one kind, and its value is written in the form the kind table below gives.
 //! A time-tagged point (`stamped`) reports its changes with their time. The address is an
 //! information object address, 1 to 16777215, and each address is used once (IMPLEMENTATION.md §5).
+//!
+//! Two optional fields give the point its behaviour. `command` is how the station answers the
+//! commands to the point: `unknown_address` (the default), `refuse`, or `accept` (only for a single or
+//! double point). `simulation` makes the point change by itself: `{"kind": "toggle" | "ramp" | "walk",
+//! "period_ms": N, "increment": X, "seed": S}`, with `toggle` for a single or double point, and `ramp` or
+//! `walk` for a normalized, scaled, or float point (see `simulate`).
 
 use std::fmt;
 use std::path::Path;
@@ -70,6 +76,55 @@ pub struct PointSpec {
     /// Whether the point is time-tagged.
     #[serde(default)]
     pub stamped: bool,
+    /// How the station answers the commands to the point (§7). Unknown address by default.
+    #[serde(default)]
+    pub command: CommandPolicy,
+    /// How the point changes by itself, for a simulated station. A point that does not change has none.
+    #[serde(default)]
+    pub simulation: Option<Simulation>,
+}
+
+/// How the station answers the commands to a point (task C3, §7).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandPolicy {
+    /// The point has no command: the station refuses it as an unknown address (cause 47). The default.
+    #[default]
+    UnknownAddress,
+    /// The station confirms the command. The point keeps its value: the controller updates it.
+    Accept,
+    /// The station refuses the command with a negative confirmation.
+    Refuse,
+}
+
+/// How a point changes by itself (task C3). Every change is a function of the step number and the
+/// seed, so a run is repeatable.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Simulation {
+    /// The motion of the point.
+    pub kind: SimulationKind,
+    /// The time between two steps, in milliseconds (at least 1).
+    pub period_ms: u64,
+    /// The change at each step: for `ramp` (any sign) and `walk` (its size, above zero). Not used by
+    /// `toggle`. A scaled point takes an integer.
+    #[serde(default)]
+    pub increment: Option<f64>,
+    /// The seed of `walk`: the sign of each step is drawn from it.
+    #[serde(default)]
+    pub seed: u64,
+}
+
+/// The motions of a simulated point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SimulationKind {
+    /// A single or double point changes state at each step.
+    Toggle,
+    /// A measured value moves by the increment at each step, and wraps around its range.
+    Ramp,
+    /// A measured value moves by the increment up or down at each step, drawn from the seed.
+    Walk,
 }
 
 #[derive(Deserialize)]
@@ -97,6 +152,20 @@ pub enum PointError {
     Address(u32),
     /// An address used by two points.
     Duplicate(u32),
+    /// A command policy that the kind of the point cannot take.
+    Command {
+        /// The address of the point.
+        address: u32,
+        /// Why.
+        reason: &'static str,
+    },
+    /// A simulation that the kind of the point or its parameters cannot take.
+    Simulation {
+        /// The address of the point.
+        address: u32,
+        /// Why.
+        reason: &'static str,
+    },
     /// A value that does not fit the kind of its point.
     Value {
         /// The address of the point.
@@ -124,6 +193,8 @@ impl fmt::Display for PointError {
                 )
             }
             Self::Duplicate(address) => write!(f, "address {address} is used by two points"),
+            Self::Command { address, reason } => write!(f, "point {address}: {reason}"),
+            Self::Simulation { address, reason } => write!(f, "point {address}: {reason}"),
             Self::Value {
                 address,
                 kind,
@@ -162,8 +233,57 @@ pub fn parse(text: &str) -> Result<Vec<PointSpec>, PointError> {
             return Err(PointError::Duplicate(point.address));
         }
         point.point_value()?;
+        check_command_and_simulation(point)?;
     }
     Ok(file.points)
+}
+
+/// Checks that the command policy and the simulation fit the kind of the point.
+fn check_command_and_simulation(point: &PointSpec) -> Result<(), PointError> {
+    let address = point.address;
+    let single_or_double = matches!(point.kind, Kind::Single | Kind::Double);
+    if point.command == CommandPolicy::Accept && !single_or_double {
+        return Err(PointError::Command {
+            address,
+            reason: "a command can be accepted only on a single or double point",
+        });
+    }
+    let Some(simulation) = &point.simulation else {
+        return Ok(());
+    };
+    let simulation_error = |reason| PointError::Simulation { address, reason };
+    if simulation.period_ms == 0 {
+        return Err(simulation_error(
+            "the period must be at least 1 millisecond",
+        ));
+    }
+    match simulation.kind {
+        SimulationKind::Toggle if !single_or_double => {
+            Err(simulation_error("toggle needs a single or double point"))
+        }
+        SimulationKind::Ramp | SimulationKind::Walk if single_or_double => Err(simulation_error(
+            "ramp and walk need a normalized, scaled, or float point",
+        )),
+        SimulationKind::Toggle => Ok(()),
+        SimulationKind::Ramp | SimulationKind::Walk => {
+            let increment = simulation
+                .increment
+                .filter(|increment| increment.is_finite())
+                .ok_or_else(|| simulation_error("ramp and walk need a finite increment"))?;
+            if simulation.kind == SimulationKind::Walk && increment <= 0.0 {
+                return Err(simulation_error("the walk's increment must be above zero"));
+            }
+            if simulation.kind == SimulationKind::Ramp && increment == 0.0 {
+                return Err(simulation_error("a ramp's increment must not be zero"));
+            }
+            if point.kind == Kind::Scaled && increment.fract() != 0.0 {
+                return Err(simulation_error(
+                    "a scaled point takes an integer increment",
+                ));
+            }
+            Ok(())
+        }
+    }
 }
 
 /// The information object address for `address`, when it is in range.
