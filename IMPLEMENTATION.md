@@ -521,6 +521,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: B1, C4.
 - Produce: the server with stdout reserved for MCP, stable error codes, and the definition tools of §9.
 - Done when: an MCP client test lists the tools and validates a definition.
+- Done (D-031): the nine definition tools over stdio, with stable error codes; a real MCP client lists them and validates a bench.
 
 **M2 — Scenario and run tools**
 - Depends: M1, E3, D2.
@@ -609,7 +610,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E3 Cancellation and cleanup | [x] |
 | E4 Parallel branches and barriers | [x] |
 | E5 Restart and reconnect primitives | [x] |
-| M1 MCP server over stdio | [ ] |
+| M1 MCP server over stdio | [x] |
 | M2 Scenario and run tools | [ ] |
 | M3 Confirmation on external targets | [ ] |
 | M4 Streamable HTTP transport ⛔ | [ ] |

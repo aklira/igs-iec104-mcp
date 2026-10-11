@@ -586,3 +586,35 @@ test can show it.
   an update waits for the stored value); `tests/integration/test_restart_scenario.py` (a station is restarted under
   a scenario, the client reconnects, starts its transfer, interrogates again, and reads the restarted station's
   value; a reconnect that does not come in time times out, and the cleanup starts the station again).
+
+## D-031: The MCP server over stdio and the definition tools (M1)
+
+- Date: 2026-10-11 (task M1).
+- Decision: the server is `igs_iec104_mcp.server` on the official SDK (`mcp` 2.x, `MCPServer`), started with
+  `python -m igs_iec104_mcp --project DIR` over stdio. The project directory must exist; otherwise the server stops
+  with status 2 and says so on stderr. Stdout carries the MCP messages only: nothing else is printed to it.
+- Tools (§9, the definition group): `bench_validate`, `bench_create`, `bench_get`, `bench_list`, `scenario_validate`,
+  `scenario_create`, `scenario_update`, `scenario_get`, `scenario_list`. The business logic is in
+  `definitions/service.py`, which the tools call and the tests call. Benches have no update tool in §9.
+- Results: a validation is a result, not an error: `{valid, issues: [{path, message}]}`. A scenario is validated
+  against its bench when the project has it, and a missing bench is an issue at `bench`. A definition, a page, and
+  a revision are typed structures.
+- Errors: a failed request is a tool error with a stable code, one of `invalid_definition`, `invalid_name`,
+  `not_found`, `already_exists`, `stale_revision`, `invalid_argument`, `storage_error`. The SDK puts
+  `Error executing tool <name>: ` in front of the text of a tool error, so the code is the first word after that
+  prefix. A crash of the server is not a code: the SDK reports it without its text.
+- Pagination: `bench_list` and `scenario_list` take `limit` (1 to 200, default 50) and a `cursor`. The cursor is the
+  last name of a page, and the names are in order, so a page does not shift when a definition is added.
+- The store gains two kinds of error: `InvalidName` (a name that is not valid, or leads outside the project) and
+  `NameMismatch` (a definition whose own name is not its file's name). Both are `StoreError`s, so the existing checks
+  still hold, and the service maps them to `invalid_name` and `invalid_definition`.
+- Test setup: the project is not installed in the test environment (uv `package = false`), so the test starts the
+  server with `PYTHONPATH` set to `src`.
+- Not in M1: `bench_start`, `bench_stop`, `bench_destroy`, the instance and run tools, `target_validate` (X1), the run
+  tools (M2), and Streamable HTTP (M4). The definition tools do blocking file I/O inside the tool call, which is short
+  and under a lock; that is accepted for definitions and noted for the Docker tools (M2), which must not block.
+- Tests: `tests/unit/test_mcp_service.py` (validation of a bench and of a scenario against its bench, creation and
+  reading with revisions, a repeated create, a missing definition, bad names, invalid text, updates with a stale
+  revision, pagination and its limits, and the server's exit with status 2); `tests/integration/test_mcp_stdio.py` (a
+  real MCP client starts the server, lists the nine tools, validates a bench, stores one, reads it back, and sees the
+  error codes). The integration job of CI runs the stdio test.

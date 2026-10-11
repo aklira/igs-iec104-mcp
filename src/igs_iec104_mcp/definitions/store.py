@@ -55,6 +55,14 @@ class StoreError(Exception):
     """A definition could not be read or stored. The message says why and what to do."""
 
 
+class InvalidName(StoreError):
+    """A name is not a valid definition name, or leads outside the project directory."""
+
+
+class NameMismatch(StoreError):
+    """A definition's own name is not the name of its file."""
+
+
 class StaleRevision(StoreError):
     """The file changed, or was removed, since it was read: read it again, merge the
     change, and write again."""
@@ -197,13 +205,13 @@ class ProjectStore:
                 f"{kind!r} is not a kind of definition: use 'bench' or 'scenario'"
             )
         if not _is_name(name):
-            raise StoreError(
+            raise InvalidName(
                 f"{name!r} is not a valid name: use lower-case letters, digits, and "
                 "hyphens, starting with a letter, and no path"
             )
         path = self.root / DIRECTORIES[kind] / f"{name}.yaml"
         if not self._is_inside(path):
-            raise StoreError(f"{name!r} leads outside the project directory: refused")
+            raise InvalidName(f"{name!r} leads outside the project directory: refused")
         return path
 
     def _run_file(self, run_id: str) -> Path:
@@ -246,7 +254,7 @@ def _checked[M: BaseModel](model: M, name: str) -> M:
     otherwise, so that a file is found by the name it has."""
     own = getattr(model, "name", None)
     if isinstance(model, TestBench | Scenario) and own != name:
-        raise StoreError(
+        raise NameMismatch(
             f"the file is named {name!r}, but the definition says name: {own!r}: "
             "rename one of them"
         )
