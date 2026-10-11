@@ -558,7 +558,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 
 | Task | Done |
 | --- | --- |
-| B1 Python project and tooling | [ ] |
+| B1 Python project and tooling | [x] |
 | B2 Rust runtime skeleton and image | [ ] |
 | U1 Graceful server shutdown (upstream) ⛔ | [x] |
 | U2 Server connection events (upstream) ⛔ | [x] |
