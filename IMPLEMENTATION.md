@@ -571,7 +571,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | C2 Client correlation, generations, point image | [x] |
 | C3 Server points, simulation, command policy | [x] |
 | C4 Definition models and YAML schemas | [x] |
-| C5 Definition storage | [ ] |
+| C5 Definition storage | [x] |
 | D1 Docker adapter and labels | [ ] |
 | D2 Test bench lifecycle | [ ] |
 | D3 Reconciliation | [ ] |

@@ -193,3 +193,27 @@ test can show it.
 - The plan's example (§8) writes `type:` for a point; the definitions write `kind:`, as the point model does.
 - Test: `tests/unit/test_models_*.py` (each rejection of §5, with its message), and
   `tests/unit/test_models_schemas.py` (the committed schemas match the models; a changed schema is reported).
+
+## D-014: Project directory, revisions, and run snapshots
+
+- Date: 2026-10-11 (task C5).
+- Decision: the definitions live in one explicit project directory: `benches/<name>.yaml`,
+  `scenarios/<name>.yaml`, and `runs/<run-id>/snapshot.json`. The directory must exist; the store does
+  not create it. A definition's file name is its `name`, and a file whose definition names another is
+  refused.
+- Containment: a name is checked against the name pattern before it becomes a path, and a path is
+  resolved, with its symbolic links followed, before it is read or written. A path outside the project
+  directory is refused. The lock file is opened without following a link.
+- Revisions: a file's revision is the SHA-256 of its bytes. An update names the revision it was read at;
+  it is refused when the file has changed or was removed since. A new definition is written only when no
+  file of that name exists.
+- Atomic writes: the text is written to a temporary file in the same directory, flushed to disk, and
+  replaced in one step; the temporary file is removed when the write fails. Writers hold an exclusive
+  `flock` on `.lock` in the project directory, so the check and the replacement are one step, also
+  between processes. The lock uses the standard library only (no dependency).
+- Validation: a definition is checked before it is written, so an invalid one never reaches the project.
+- Snapshots: a run's snapshot holds the bench and the scenario as they were at the start, checked against
+  each other with `check_scenario`, and their SHA-256 hashes. It is written once and never changed; it is
+  read back with its hashes checked.
+- Test: `tests/unit/test_definitions_store.py` (traversal, links, stale and concurrent updates, failed
+  writes, invalid definitions, the snapshot unaffected by a later edit, a changed snapshot refused).
