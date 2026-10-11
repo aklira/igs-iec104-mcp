@@ -3,23 +3,18 @@
 //! The station runs in this process, with the upstream server (the stack of `igs104-server`).
 //! The manual check against the demo binary is recorded in `docs/ai-log/S1.md`.
 
-use std::net::SocketAddr;
-use std::time::Duration;
+mod common;
 
+use std::net::SocketAddr;
+
+use common::{get, has_event, post, send, wait_for};
 use igs_iec104::process_image::PointValue;
 use igs_iec104::server::{Handler, Operation, Refusal, Server, ServerConfig};
 use igs_iec104_codec::elements::{QualityFlags, Siq};
 use igs_iec104_codec::header::{CommonAddress, InformationObjectAddress};
-use igs_iec104_runtime::config::{Config, DEFAULT_CONTROL, DEFAULT_EVENT_CAPACITY};
+use igs_iec104_runtime::config::{Config, Role, DEFAULT_CONTROL, DEFAULT_EVENT_CAPACITY};
 use igs_iec104_runtime::runtime::Runtime;
-use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::oneshot;
-use tokio::time::{sleep, timeout};
-
-/// The longest a test waits for the runtime to reach a state.
-const PATIENCE: Duration = Duration::from_secs(10);
 
 /// A station that refuses every command: the tests only read from it.
 struct Refuse;
@@ -56,66 +51,11 @@ async fn station() -> SocketAddr {
 
 fn config(connect: SocketAddr) -> Config {
     Config {
-        connect,
+        role: Role::Client { connect },
         common_address: 1,
         control: DEFAULT_CONTROL,
         event_capacity: DEFAULT_EVENT_CAPACITY,
     }
-}
-
-/// One HTTP request to the control API. It returns the status code and the JSON body.
-async fn call(control: SocketAddr, method: &str, path: &str) -> (u16, Value) {
-    let mut stream = TcpStream::connect(control)
-        .await
-        .expect("the control API accepts");
-    let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {control}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .expect("the request is written");
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .await
-        .expect("the response is read");
-    let text = String::from_utf8(response).expect("the response is text");
-    let (head, body) = text
-        .split_once("\r\n\r\n")
-        .expect("the response has a body");
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse().ok())
-        .expect("the status line has a code");
-    (
-        status,
-        serde_json::from_str(body).expect("the body is JSON"),
-    )
-}
-
-/// Polls `path` until `reached` accepts its body, and returns that body.
-async fn wait_for(control: SocketAddr, path: &str, reached: impl Fn(&Value) -> bool) -> Value {
-    timeout(PATIENCE, async {
-        loop {
-            let (_, body) = call(control, "GET", path).await;
-            if reached(&body) {
-                return body;
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the runtime reached the state within the patience of the test")
-}
-
-/// Whether an event of the body matches `matches`.
-fn has_event(body: &Value, matches: impl Fn(&Value) -> bool) -> bool {
-    body["events"]
-        .as_array()
-        .is_some_and(|events| events.iter().any(matches))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -131,10 +71,11 @@ async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_inter
 
     let ready = wait_for(control, "/v1/ready", |body| body["connection"] == "up").await;
     assert_eq!(ready["ready"], true);
+    assert_eq!(ready["role"], "client");
     assert_eq!(ready["control_address"], control.to_string());
     assert_eq!(ready["transfer"], "stopped");
 
-    let (status, body) = call(control, "POST", "/v1/transfer/start").await;
+    let (status, body) = send(control, "POST", "/v1/transfer/start", None).await;
     assert_eq!(status, 202);
     assert_eq!(body["accepted"], true);
     wait_for(control, "/v1/events", |body| {
@@ -144,7 +85,7 @@ async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_inter
     })
     .await;
 
-    let (status, body) = call(control, "POST", "/v1/interrogation/general").await;
+    let (status, body) = send(control, "POST", "/v1/interrogation/general", None).await;
     assert_eq!(status, 202);
     assert_eq!(body["accepted"], true);
     let events = wait_for(control, "/v1/events", |body| {
@@ -156,7 +97,7 @@ async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_inter
 
     // The station answers with its point, a single point (M_SP_NA_1) interrogated by the station
     // (cause 20), then ends the interrogation (cause 10).
-    let asdus: Vec<&Value> = events["events"]
+    let asdus: Vec<&serde_json::Value> = events["events"]
         .as_array()
         .expect("the events are a list")
         .iter()
@@ -201,16 +142,19 @@ async fn a_request_made_without_a_connection_is_reported_as_discarded() {
         has_event(body, |event| event["kind"] == "connect_failed")
     })
     .await;
-    let (status, body) = call(control, "POST", "/v1/transfer/start").await;
+    let (status, body) = send(control, "POST", "/v1/transfer/start", None).await;
     assert_eq!(status, 202, "the request is queued, not refused: {body}");
 
     wait_for(control, "/v1/events", |body| {
         has_event(body, |event| event["kind"] == "discarded")
     })
     .await;
-    let (_, ready) = call(control, "GET", "/v1/ready").await;
+    let (_, ready) = get(control, "/v1/ready").await;
     assert_eq!(ready["connection"], "down");
     assert_eq!(ready["transfer"], "stopped");
+
+    let (status, _) = post(control, "/v1/points/1", &serde_json::json!({"value": true})).await;
+    assert_eq!(status, 409, "a client does not serve points");
 
     let _ = stop.send(());
     serving

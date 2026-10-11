@@ -1,4 +1,4 @@
-//! The runtime's binary: prints its identity, or runs the client of one station.
+//! The runtime's binary: prints its identity, or runs a client of one station, or a station.
 
 #![deny(unsafe_code)]
 
@@ -47,7 +47,7 @@ async fn stop_requested() {
     }
 }
 
-/// Runs the client until it is asked to stop.
+/// Runs the role until the runtime is asked to stop.
 async fn run(config: Config) -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -55,11 +55,14 @@ async fn run(config: Config) -> ExitCode {
     let runtime = match Runtime::bind(config).await {
         Ok(runtime) => runtime,
         Err(error) => {
-            tracing::error!(%error, "the control address could not be bound");
+            tracing::error!(%error, "the runtime cannot start");
             return ExitCode::FAILURE;
         }
     };
     tracing::info!(control = %runtime.control_address(), "control API listening");
+    if let Some(station) = runtime.station_address() {
+        tracing::info!(%station, "station listening");
+    }
     match runtime.serve(stop_requested()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

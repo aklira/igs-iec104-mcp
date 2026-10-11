@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 
 /// The control address when none is given: loopback, on a port the runtime chooses (§6).
 pub const DEFAULT_CONTROL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
@@ -12,12 +13,30 @@ const MAX_EVENT_CAPACITY: usize = 1_000_000;
 /// The largest common address of a station: 65535 is the global address, which a station refuses.
 const MAX_COMMON_ADDRESS: u16 = 65534;
 
-/// What the runtime runs as: a client of one station.
+/// What the runtime runs as.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// A client of one station.
+    Client {
+        /// The address of the station the client connects to.
+        connect: SocketAddr,
+    },
+    /// A station serving the points of a file.
+    Server {
+        /// The address the station listens on. Port 0 lets the runtime choose a free port and
+        /// report it.
+        listen: SocketAddr,
+        /// The points file (see `points`).
+        points: PathBuf,
+    },
+}
+
+/// What the runtime runs, and how its control API is reached.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
-    /// The address of the station the client connects to.
-    pub connect: SocketAddr,
-    /// The common address of the station, 1 to 65534.
+    /// The role: a client or a server.
+    pub role: Role,
+    /// The common address of the station, or of the station the client talks to: 1 to 65534.
     pub common_address: u16,
     /// The address of the control API. Port 0 lets the runtime choose a free port and report it.
     pub control: SocketAddr,
@@ -32,7 +51,7 @@ pub enum Invocation {
     Banner,
     /// `--help`: print the usage and exit.
     Usage,
-    /// Run the client.
+    /// Run the runtime.
     Run(Config),
 }
 
@@ -43,8 +62,14 @@ pub enum ConfigError {
     UnknownOption(String),
     /// An option without its value.
     MissingValue(&'static str),
-    /// The client needs the station to connect to.
-    MissingConnect,
+    /// Neither `--connect` nor `--listen` was given.
+    MissingRole,
+    /// Both `--connect` and `--listen` were given.
+    ConflictingRoles,
+    /// `--listen` was given without `--points`.
+    MissingPoints,
+    /// `--points` was given to a client, which serves no points.
+    PointsWithClient,
     /// A value out of its range, or not a valid address or number.
     Invalid {
         /// The option.
@@ -59,7 +84,15 @@ impl fmt::Display for ConfigError {
         match self {
             Self::UnknownOption(option) => write!(f, "unknown option {option}"),
             Self::MissingValue(option) => write!(f, "{option} needs a value"),
-            Self::MissingConnect => write!(f, "--connect ADDRESS is required"),
+            Self::MissingRole => write!(
+                f,
+                "give --connect ADDRESS to run a client, or --listen ADDRESS --points FILE to run a station"
+            ),
+            Self::ConflictingRoles => write!(f, "give either --connect or --listen, not both"),
+            Self::MissingPoints => write!(f, "--listen needs --points FILE"),
+            Self::PointsWithClient => {
+                write!(f, "--points is for a station; a client serves no points")
+            }
             Self::Invalid { option, value } => write!(f, "invalid value {value:?} for {option}"),
         }
     }
@@ -68,9 +101,12 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// The usage of the runtime, printed for `--help` and with a command-line error.
-pub const USAGE: &str = "usage: igs-iec104-runtime --connect ADDRESS [options]
+pub const USAGE: &str =
+    "usage: igs-iec104-runtime (--connect ADDRESS | --listen ADDRESS --points FILE) [options]
 
-  --connect ADDRESS         the station to connect to, for example 127.0.0.1:2404
+  --connect ADDRESS         run a client of the station at ADDRESS, for example 127.0.0.1:2404
+  --listen ADDRESS          run a station listening on ADDRESS, for example 127.0.0.1:2404
+  --points FILE             the points of the station (JSON, see the runtime documentation)
   --common-address N        the common address of the station, 1 to 65534 (default 1)
   --control ADDRESS         the address of the control API (default 127.0.0.1:0)
   --event-capacity N        the events kept for the control API (default 1024)
@@ -89,6 +125,8 @@ where
     }
 
     let mut connect = None;
+    let mut listen = None;
+    let mut points = None;
     let mut common_address = 1;
     let mut control = DEFAULT_CONTROL;
     let mut event_capacity = DEFAULT_EVENT_CAPACITY;
@@ -96,8 +134,12 @@ where
         match argument.as_str() {
             "-h" | "--help" => return Ok(Invocation::Usage),
             "--connect" => {
-                connect = Some(address("--connect", value("--connect", &mut arguments)?)?)
+                connect = Some(address("--connect", value("--connect", &mut arguments)?)?);
             }
+            "--listen" => {
+                listen = Some(address("--listen", value("--listen", &mut arguments)?)?);
+            }
+            "--points" => points = Some(PathBuf::from(value("--points", &mut arguments)?)),
             "--common-address" => {
                 let text = value("--common-address", &mut arguments)?;
                 common_address = number("--common-address", &text, 1..=MAX_COMMON_ADDRESS)?;
@@ -111,9 +153,22 @@ where
         }
     }
 
-    let connect = connect.ok_or(ConfigError::MissingConnect)?;
+    let role = match (connect, listen) {
+        (Some(_), Some(_)) => return Err(ConfigError::ConflictingRoles),
+        (None, None) => return Err(ConfigError::MissingRole),
+        (Some(connect), None) => {
+            if points.is_some() {
+                return Err(ConfigError::PointsWithClient);
+            }
+            Role::Client { connect }
+        }
+        (None, Some(listen)) => Role::Server {
+            listen,
+            points: points.ok_or(ConfigError::MissingPoints)?,
+        },
+    };
     Ok(Invocation::Run(Config {
-        connect,
+        role,
         common_address,
         control,
         event_capacity,
@@ -184,12 +239,29 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_fill_the_options_that_are_not_given() {
+    fn a_client_takes_the_station_to_connect_to() {
         let config = run(&["--connect", "127.0.0.1:2404"]).expect("valid");
-        assert_eq!(config.connect, "127.0.0.1:2404".parse().expect("address"));
+        assert_eq!(
+            config.role,
+            Role::Client {
+                connect: "127.0.0.1:2404".parse().expect("address"),
+            }
+        );
         assert_eq!(config.common_address, 1);
         assert_eq!(config.control, DEFAULT_CONTROL);
         assert_eq!(config.event_capacity, DEFAULT_EVENT_CAPACITY);
+    }
+
+    #[test]
+    fn a_station_takes_its_listen_address_and_its_points() {
+        let config = run(&["--listen", "127.0.0.1:0", "--points", "points.json"]).expect("valid");
+        assert_eq!(
+            config.role,
+            Role::Server {
+                listen: "127.0.0.1:0".parse().expect("address"),
+                points: PathBuf::from("points.json"),
+            }
+        );
     }
 
     #[test]
@@ -211,10 +283,33 @@ mod tests {
     }
 
     #[test]
-    fn the_connect_address_is_required() {
+    fn exactly_one_role_is_required() {
         assert_eq!(
-            parse(args(&["--common-address", "1"])),
-            Err(ConfigError::MissingConnect)
+            parse(args(&["--control", "127.0.0.1:0"])),
+            Err(ConfigError::MissingRole)
+        );
+        assert_eq!(
+            parse(args(&[
+                "--connect",
+                "127.0.0.1:2404",
+                "--listen",
+                "127.0.0.1:0",
+                "--points",
+                "p.json"
+            ])),
+            Err(ConfigError::ConflictingRoles)
+        );
+    }
+
+    #[test]
+    fn a_station_needs_points_and_a_client_takes_none() {
+        assert_eq!(
+            parse(args(&["--listen", "127.0.0.1:0"])),
+            Err(ConfigError::MissingPoints)
+        );
+        assert_eq!(
+            parse(args(&["--connect", "127.0.0.1:2404", "--points", "p.json"])),
+            Err(ConfigError::PointsWithClient)
         );
     }
 

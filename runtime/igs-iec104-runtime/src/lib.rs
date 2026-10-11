@@ -10,7 +10,9 @@ pub mod api;
 pub mod client_role;
 pub mod config;
 pub mod events;
+pub mod points;
 pub mod runtime;
+pub mod server_role;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
