@@ -1,0 +1,530 @@
+{
+  "$defs": {
+    "CleanupPolicy": {
+      "additionalProperties": false,
+      "description": "When the bench's resources are removed, and whether the evidence is kept (\u00a76, \u00a710).",
+      "properties": {
+        "keep_evidence": {
+          "default": true,
+          "title": "Keep Evidence",
+          "type": "boolean"
+        },
+        "remove": {
+          "default": "success_and_failure",
+          "enum": [
+            "success_and_failure",
+            "success",
+            "never"
+          ],
+          "title": "Remove",
+          "type": "string"
+        }
+      },
+      "title": "CleanupPolicy",
+      "type": "object"
+    },
+    "CommandPolicy": {
+      "description": "How the station answers the commands to a point (\u00a77).",
+      "enum": [
+        "unknown_address",
+        "refuse",
+        "accept"
+      ],
+      "title": "CommandPolicy",
+      "type": "string"
+    },
+    "Connection": {
+      "additionalProperties": false,
+      "description": "A connection from a client to a server, both declared by the bench.",
+      "properties": {
+        "client": {
+          "description": "The instance or external target that starts the connection.",
+          "title": "Client",
+          "type": "string"
+        },
+        "server": {
+          "description": "The instance or external target that accepts the connection.",
+          "title": "Server",
+          "type": "string"
+        }
+      },
+      "required": [
+        "client",
+        "server"
+      ],
+      "title": "Connection",
+      "type": "object"
+    },
+    "Endpoint": {
+      "additionalProperties": false,
+      "description": "Where the target listens or is reached.",
+      "properties": {
+        "host": {
+          "description": "A host name or an address.",
+          "maxLength": 253,
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "title": "Endpoint",
+      "type": "object"
+    },
+    "ExternalTarget": {
+      "additionalProperties": false,
+      "description": "A peer outside the bench, with the operations the controller may perform on \"\n\"it.",
+      "properties": {
+        "allowed_operations": {
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "title": "Allowed Operations",
+          "type": "array"
+        },
+        "common_address": {
+          "title": "Common Address",
+          "type": "integer"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/Endpoint"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "network": {
+          "description": "The external network the target is reached on.",
+          "title": "Network",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "client",
+            "server"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSecrets"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "network",
+        "endpoint",
+        "common_address"
+      ],
+      "title": "ExternalTarget",
+      "type": "object"
+    },
+    "Instance": {
+      "additionalProperties": false,
+      "description": "A runtime of the bench: a client of a station, or a station.",
+      "properties": {
+        "common_address": {
+          "title": "Common Address",
+          "type": "integer"
+        },
+        "limits": {
+          "$ref": "#/$defs/ResourceLimits"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "network": {
+          "description": "The network the runtime is on; it must be declared by the bench.",
+          "title": "Network",
+          "type": "string"
+        },
+        "parameters": {
+          "$ref": "#/$defs/LinkParameters"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "title": "Points",
+          "type": "array"
+        },
+        "role": {
+          "enum": [
+            "client",
+            "server"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role",
+        "network",
+        "common_address"
+      ],
+      "title": "Instance",
+      "type": "object"
+    },
+    "LinkParameters": {
+      "additionalProperties": false,
+      "description": "The timeouts (whole seconds) and the window sizes of the link, with the defaults of\n    \u00a79.6.",
+      "properties": {
+        "k": {
+          "default": 12,
+          "description": "Unacknowledged I frames the sender may have.",
+          "maximum": 32767,
+          "minimum": 1,
+          "title": "K",
+          "type": "integer"
+        },
+        "t0": {
+          "default": 30,
+          "description": "Connection establishment, in seconds.",
+          "maximum": 255,
+          "minimum": 1,
+          "title": "T0",
+          "type": "integer"
+        },
+        "t1": {
+          "default": 15,
+          "description": "Sending or testing APDUs, in seconds.",
+          "maximum": 255,
+          "minimum": 1,
+          "title": "T1",
+          "type": "integer"
+        },
+        "t2": {
+          "default": 10,
+          "description": "Acknowledgements without data, in seconds; below t1.",
+          "maximum": 255,
+          "minimum": 1,
+          "title": "T2",
+          "type": "integer"
+        },
+        "t3": {
+          "default": 20,
+          "description": "Test frames in a long idle state, in seconds.",
+          "minimum": 1,
+          "title": "T3",
+          "type": "integer"
+        },
+        "w": {
+          "default": 8,
+          "description": "I frames received before an acknowledgement.",
+          "maximum": 32767,
+          "minimum": 1,
+          "title": "W",
+          "type": "integer"
+        }
+      },
+      "title": "LinkParameters",
+      "type": "object"
+    },
+    "Network": {
+      "additionalProperties": false,
+      "description": "A network of the bench. An external network can reach the external targets.",
+      "properties": {
+        "external": {
+          "default": false,
+          "description": "Whether the runtimes on it may reach external targets (\u00a76).",
+          "title": "External",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Network",
+      "type": "object"
+    },
+    "Operation": {
+      "description": "The protocol operations a target may be asked for (\u00a79). The state-changing ones need\n    confirmation.",
+      "enum": [
+        "start_transfer",
+        "stop_transfer",
+        "interrogate",
+        "read",
+        "counter_interrogation",
+        "clock_sync",
+        "test_command",
+        "command",
+        "setpoint",
+        "counter_freeze",
+        "counter_reset"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "Point": {
+      "additionalProperties": false,
+      "description": "One information object of a station, with its value and its behaviour.",
+      "properties": {
+        "address": {
+          "title": "Address",
+          "type": "integer"
+        },
+        "command": {
+          "$ref": "#/$defs/CommandPolicy",
+          "default": "unknown_address"
+        },
+        "kind": {
+          "$ref": "#/$defs/PointKind"
+        },
+        "simulation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Simulation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stamped": {
+          "default": false,
+          "title": "Stamped",
+          "type": "boolean"
+        },
+        "value": {
+          "description": "The value, in the form of the kind (see PointKind).",
+          "title": "Value"
+        }
+      },
+      "required": [
+        "address",
+        "kind",
+        "value"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
+    "PointKind": {
+      "description": "The monitoring kinds of a point, as the upstream `PointValue` names them.",
+      "enum": [
+        "single",
+        "double",
+        "step",
+        "bitstring",
+        "normalized",
+        "scaled",
+        "float",
+        "counter",
+        "packed",
+        "normalized_unqualified"
+      ],
+      "title": "PointKind",
+      "type": "string"
+    },
+    "ResourceLimits": {
+      "additionalProperties": false,
+      "description": "The limits of one runtime's container (\u00a76): CPU, memory, processes, events, and\nexecution time.",
+      "properties": {
+        "cpu": {
+          "default": 0.5,
+          "description": "CPU share, in cores.",
+          "exclusiveMinimum": 0,
+          "maximum": 8,
+          "title": "Cpu",
+          "type": "number"
+        },
+        "event_buffer": {
+          "default": 10000,
+          "description": "Events kept for the run.",
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Event Buffer",
+          "type": "integer"
+        },
+        "execution_seconds": {
+          "default": 3600,
+          "description": "Execution time, in seconds.",
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Execution Seconds",
+          "type": "integer"
+        },
+        "memory_mb": {
+          "default": 256,
+          "description": "Memory, in megabytes.",
+          "maximum": 4096,
+          "minimum": 16,
+          "title": "Memory Mb",
+          "type": "integer"
+        },
+        "pids": {
+          "default": 64,
+          "description": "Processes and threads.",
+          "maximum": 512,
+          "minimum": 1,
+          "title": "Pids",
+          "type": "integer"
+        }
+      },
+      "title": "ResourceLimits",
+      "type": "object"
+    },
+    "Simulation": {
+      "additionalProperties": false,
+      "description": "A change of a point at each period. Every change is a function of the step and\"\n\"the seed.",
+      "properties": {
+        "increment": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The change at each step, for ramp (any sign) and walk (its size, above zero). Not used by toggle.",
+          "title": "Increment"
+        },
+        "kind": {
+          "$ref": "#/$defs/SimulationKind"
+        },
+        "period_ms": {
+          "description": "The time between two steps, in milliseconds.",
+          "maximum": 86400000,
+          "minimum": 1,
+          "title": "Period Ms",
+          "type": "integer"
+        },
+        "seed": {
+          "default": 0,
+          "description": "The seed of a walk.",
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "period_ms"
+      ],
+      "title": "Simulation",
+      "type": "object"
+    },
+    "SimulationKind": {
+      "description": "How a point changes by itself: toggle, ramp, or a seeded walk.",
+      "enum": [
+        "toggle",
+        "ramp",
+        "walk"
+      ],
+      "title": "SimulationKind",
+      "type": "string"
+    },
+    "TlsSecrets": {
+      "additionalProperties": false,
+      "description": "The secrets of a secured connection: the names of the certificates and keys, never\n    their content.",
+      "properties": {
+        "ca": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The certificate authority that signs the peer.",
+          "title": "Ca"
+        },
+        "certificate": {
+          "title": "Certificate",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key"
+      ],
+      "title": "TlsSecrets",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The definition of a test bench.",
+  "properties": {
+    "cleanup": {
+      "$ref": "#/$defs/CleanupPolicy"
+    },
+    "connections": {
+      "items": {
+        "$ref": "#/$defs/Connection"
+      },
+      "title": "Connections",
+      "type": "array"
+    },
+    "external_targets": {
+      "items": {
+        "$ref": "#/$defs/ExternalTarget"
+      },
+      "title": "External Targets",
+      "type": "array"
+    },
+    "instances": {
+      "items": {
+        "$ref": "#/$defs/Instance"
+      },
+      "title": "Instances",
+      "type": "array"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "networks": {
+      "items": {
+        "$ref": "#/$defs/Network"
+      },
+      "minItems": 1,
+      "title": "Networks",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "name",
+    "networks"
+  ],
+  "title": "TestBench",
+  "type": "object"
+}

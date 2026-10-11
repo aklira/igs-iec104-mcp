@@ -174,3 +174,22 @@ test can show it.
   clock), `src/points.rs` (the validation of the policy and the simulation), `src/station_log.rs`, and
   `tests/station.rs` (the policy and the log, the selection time-out, the connection events, the stop
   report, and the losses), with `tests/contract.rs` for the station events.
+
+## D-013: Definition models, YAML reading, and published schemas
+
+- Date: 2026-10-11 (task C4).
+- Decision: the definitions (test bench, scenario, run) are pydantic models, with `extra="forbid"` on
+  every model, so that an unknown field is refused by name. Each top-level definition has a
+  `schema_version` of 1. YAML is read with the safe loader of `ruamel.yaml`, with duplicate keys refused.
+  The JSON Schemas are generated from the models into `contracts/definitions/`, and `--check` (also a unit
+  test) fails when a committed schema differs from its model.
+- Rules: the common address is 1 to 65534; an information object address is 1 to 16777215; the link
+  parameters follow the upstream rules (t0 to t2 are whole seconds from 1 to 255, t2 below t1, t3 a whole
+  number of seconds of at least 1, k and w from 1 to 32767); a timeout is above zero and at most an hour
+  for a step, and a day for a whole scenario; a secret is named as `secret:<name>` and key material is
+  never written in a definition; a scenario action outside the list is refused with the list.
+- Point kinds: the eleven monitoring kinds of the upstream `PointValue` names are accepted, with the forms
+  of their values; the runtime serves five of them today (see Q-002).
+- The plan's example (§8) writes `type:` for a point; the definitions write `kind:`, as the point model does.
+- Test: `tests/unit/test_models_*.py` (each rejection of §5, with its message), and
+  `tests/unit/test_models_schemas.py` (the committed schemas match the models; a changed schema is reported).

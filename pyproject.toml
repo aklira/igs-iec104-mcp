@@ -25,8 +25,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.mypy]
 strict = true
-mypy_path = "src"
 files = ["src", "tests", "scripts"]
+mypy_path = "src:tests/unit"
 
 # jsonschema ships no type stubs, and types-jsonschema is not a listed dependency: the tests that
 # use it are typed by hand (DECISIONS.md D-009).

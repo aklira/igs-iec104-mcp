@@ -1,0 +1,235 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "step": {
+          "title": "Step",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "passed",
+        "detail",
+        "observed_at_ms"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "Outcome": {
+      "description": "The verdict of one step (\u00a77): confirmed, refused, timed out, cancelled, and \"\n\"the others.",
+      "enum": [
+        "passed",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "indeterminate",
+        "unsupported",
+        "error"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "Progress": {
+      "additionalProperties": false,
+      "properties": {
+        "completed": {
+          "minimum": 0,
+          "title": "Completed",
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "completed",
+        "total"
+      ],
+      "title": "Progress",
+      "type": "object"
+    },
+    "RunStatus": {
+      "description": "Where a run is. The last five end it.",
+      "enum": [
+        "pending",
+        "running",
+        "passed",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "error"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "description": "The inputs of a run, as they were at its start, with their hashes.",
+      "properties": {
+        "bench": {
+          "additionalProperties": true,
+          "title": "Bench",
+          "type": "object"
+        },
+        "bench_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Bench Sha256",
+          "type": "string"
+        },
+        "scenario": {
+          "additionalProperties": true,
+          "title": "Scenario",
+          "type": "object"
+        },
+        "scenario_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Scenario Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bench",
+        "bench_sha256",
+        "scenario",
+        "scenario_sha256"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "Verdict": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome"
+        },
+        "step": {
+          "title": "Step",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "outcome",
+        "detail"
+      ],
+      "title": "Verdict",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The record of one execution of a scenario.",
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "ended_at_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At Ms"
+    },
+    "id": {
+      "description": "A random identity of 32 lower-case hexadecimal digits.",
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/Observation"
+      },
+      "title": "Observations",
+      "type": "array"
+    },
+    "progress": {
+      "$ref": "#/$defs/Progress"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/Snapshot"
+    },
+    "started_at_ms": {
+      "minimum": 0,
+      "title": "Started At Ms",
+      "type": "integer"
+    },
+    "status": {
+      "$ref": "#/$defs/RunStatus"
+    },
+    "verdicts": {
+      "items": {
+        "$ref": "#/$defs/Verdict"
+      },
+      "title": "Verdicts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "status",
+    "started_at_ms",
+    "snapshot",
+    "progress"
+  ],
+  "title": "Run",
+  "type": "object"
+}

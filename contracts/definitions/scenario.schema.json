@@ -1,0 +1,536 @@
+{
+  "$defs": {
+    "AssertPoint": {
+      "additionalProperties": false,
+      "description": "Checks the client's point image as it stands (\u00a78).",
+      "properties": {
+        "action": {
+          "const": "assert_point",
+          "title": "Action",
+          "type": "string"
+        },
+        "address": {
+          "title": "Address",
+          "type": "integer"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PointKind"
+        },
+        "tolerance": {
+          "default": 0.0,
+          "description": "The tolerance of a numeric comparison.",
+          "minimum": 0,
+          "title": "Tolerance",
+          "type": "number"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "action",
+        "client",
+        "address",
+        "kind",
+        "value"
+      ],
+      "title": "AssertPoint",
+      "type": "object"
+    },
+    "ExpectPoint": {
+      "additionalProperties": false,
+      "description": "Waits for a new observation of the client after the step's cursor (\u00a78).",
+      "properties": {
+        "action": {
+          "const": "expect_point",
+          "title": "Action",
+          "type": "string"
+        },
+        "address": {
+          "title": "Address",
+          "type": "integer"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PointKind"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        },
+        "tolerance": {
+          "default": 0.0,
+          "description": "The tolerance of a numeric comparison.",
+          "minimum": 0,
+          "title": "Tolerance",
+          "type": "number"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "action",
+        "client",
+        "address",
+        "kind",
+        "value"
+      ],
+      "title": "ExpectPoint",
+      "type": "object"
+    },
+    "GeneralInterrogation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "general_interrogation",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client"
+      ],
+      "title": "GeneralInterrogation",
+      "type": "object"
+    },
+    "Parallel": {
+      "additionalProperties": false,
+      "description": "Runs branches of steps at the same time. Each branch is a list of steps, in \"\n\"order.",
+      "properties": {
+        "action": {
+          "const": "parallel",
+          "title": "Action",
+          "type": "string"
+        },
+        "branches": {
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "assert_point": "#/$defs/AssertPoint",
+                  "expect_point": "#/$defs/ExpectPoint",
+                  "general_interrogation": "#/$defs/GeneralInterrogation",
+                  "parallel": "#/$defs/Parallel",
+                  "send_command": "#/$defs/SendCommand",
+                  "start_instance": "#/$defs/StartInstance",
+                  "stop_instance": "#/$defs/StopInstance",
+                  "update_point": "#/$defs/UpdatePoint",
+                  "wait_connection": "#/$defs/WaitConnection",
+                  "wait_transfer_started": "#/$defs/WaitTransferStarted"
+                },
+                "propertyName": "action"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WaitTransferStarted"
+                },
+                {
+                  "$ref": "#/$defs/WaitConnection"
+                },
+                {
+                  "$ref": "#/$defs/GeneralInterrogation"
+                },
+                {
+                  "$ref": "#/$defs/AssertPoint"
+                },
+                {
+                  "$ref": "#/$defs/ExpectPoint"
+                },
+                {
+                  "$ref": "#/$defs/UpdatePoint"
+                },
+                {
+                  "$ref": "#/$defs/SendCommand"
+                },
+                {
+                  "$ref": "#/$defs/StopInstance"
+                },
+                {
+                  "$ref": "#/$defs/StartInstance"
+                },
+                {
+                  "$ref": "#/$defs/Parallel"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Branches",
+          "type": "array"
+        },
+        "fail_fast": {
+          "default": true,
+          "title": "Fail Fast",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "branches"
+      ],
+      "title": "Parallel",
+      "type": "object"
+    },
+    "PointKind": {
+      "description": "The monitoring kinds of a point, as the upstream `PointValue` names them.",
+      "enum": [
+        "single",
+        "double",
+        "step",
+        "bitstring",
+        "normalized",
+        "scaled",
+        "float",
+        "counter",
+        "packed",
+        "normalized_unqualified"
+      ],
+      "title": "PointKind",
+      "type": "string"
+    },
+    "SendCommand": {
+      "additionalProperties": false,
+      "description": "Sends a single or double command. A select, then an execution, is the usual \"\n\"pair (\u00a77).",
+      "properties": {
+        "action": {
+          "const": "send_command",
+          "title": "Action",
+          "type": "string"
+        },
+        "address": {
+          "title": "Address",
+          "type": "integer"
+        },
+        "command": {
+          "enum": [
+            "single",
+            "double"
+          ],
+          "title": "Command",
+          "type": "string"
+        },
+        "select": {
+          "default": false,
+          "title": "Select",
+          "type": "boolean"
+        },
+        "target": {
+          "description": "A client instance, or an external target that allows the command.",
+          "title": "Target",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        },
+        "value": {
+          "description": "true or false for a single command; \"on\" or \"off\" for a double.",
+          "title": "Value"
+        }
+      },
+      "required": [
+        "action",
+        "target",
+        "address",
+        "command",
+        "value"
+      ],
+      "title": "SendCommand",
+      "type": "object"
+    },
+    "StartInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "start_instance",
+          "title": "Action",
+          "type": "string"
+        },
+        "instance": {
+          "title": "Instance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "instance"
+      ],
+      "title": "StartInstance",
+      "type": "object"
+    },
+    "StopInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "stop_instance",
+          "title": "Action",
+          "type": "string"
+        },
+        "instance": {
+          "title": "Instance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "instance"
+      ],
+      "title": "StopInstance",
+      "type": "object"
+    },
+    "UpdatePoint": {
+      "additionalProperties": false,
+      "description": "Sets a point of a station. The value must fit the point's kind in the instance's\ndefinition.",
+      "properties": {
+        "action": {
+          "const": "update_point",
+          "title": "Action",
+          "type": "string"
+        },
+        "address": {
+          "title": "Address",
+          "type": "integer"
+        },
+        "server": {
+          "title": "Server",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "action",
+        "server",
+        "address",
+        "value"
+      ],
+      "title": "UpdatePoint",
+      "type": "object"
+    },
+    "WaitConnection": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "wait_connection",
+          "title": "Action",
+          "type": "string"
+        },
+        "instance": {
+          "description": "The instance or external target whose connection is awaited.",
+          "title": "Instance",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "instance"
+      ],
+      "title": "WaitConnection",
+      "type": "object"
+    },
+    "WaitTransferStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "wait_transfer_started",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client"
+      ],
+      "title": "WaitTransferStarted",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The definition of a scenario against one bench.",
+  "properties": {
+    "bench": {
+      "description": "The name of the bench the scenario runs on.",
+      "title": "Bench",
+      "type": "string"
+    },
+    "cleanup": {
+      "description": "Run after success, failure, or cancellation.",
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "assert_point": "#/$defs/AssertPoint",
+            "expect_point": "#/$defs/ExpectPoint",
+            "general_interrogation": "#/$defs/GeneralInterrogation",
+            "parallel": "#/$defs/Parallel",
+            "send_command": "#/$defs/SendCommand",
+            "start_instance": "#/$defs/StartInstance",
+            "stop_instance": "#/$defs/StopInstance",
+            "update_point": "#/$defs/UpdatePoint",
+            "wait_connection": "#/$defs/WaitConnection",
+            "wait_transfer_started": "#/$defs/WaitTransferStarted"
+          },
+          "propertyName": "action"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/WaitTransferStarted"
+          },
+          {
+            "$ref": "#/$defs/WaitConnection"
+          },
+          {
+            "$ref": "#/$defs/GeneralInterrogation"
+          },
+          {
+            "$ref": "#/$defs/AssertPoint"
+          },
+          {
+            "$ref": "#/$defs/ExpectPoint"
+          },
+          {
+            "$ref": "#/$defs/UpdatePoint"
+          },
+          {
+            "$ref": "#/$defs/SendCommand"
+          },
+          {
+            "$ref": "#/$defs/StopInstance"
+          },
+          {
+            "$ref": "#/$defs/StartInstance"
+          },
+          {
+            "$ref": "#/$defs/Parallel"
+          }
+        ]
+      },
+      "title": "Cleanup",
+      "type": "array"
+    },
+    "fail_fast": {
+      "default": true,
+      "title": "Fail Fast",
+      "type": "boolean"
+    },
+    "global_timeout": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The longest the whole scenario may run.",
+      "title": "Global Timeout"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "steps": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "assert_point": "#/$defs/AssertPoint",
+            "expect_point": "#/$defs/ExpectPoint",
+            "general_interrogation": "#/$defs/GeneralInterrogation",
+            "parallel": "#/$defs/Parallel",
+            "send_command": "#/$defs/SendCommand",
+            "start_instance": "#/$defs/StartInstance",
+            "stop_instance": "#/$defs/StopInstance",
+            "update_point": "#/$defs/UpdatePoint",
+            "wait_connection": "#/$defs/WaitConnection",
+            "wait_transfer_started": "#/$defs/WaitTransferStarted"
+          },
+          "propertyName": "action"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/WaitTransferStarted"
+          },
+          {
+            "$ref": "#/$defs/WaitConnection"
+          },
+          {
+            "$ref": "#/$defs/GeneralInterrogation"
+          },
+          {
+            "$ref": "#/$defs/AssertPoint"
+          },
+          {
+            "$ref": "#/$defs/ExpectPoint"
+          },
+          {
+            "$ref": "#/$defs/UpdatePoint"
+          },
+          {
+            "$ref": "#/$defs/SendCommand"
+          },
+          {
+            "$ref": "#/$defs/StopInstance"
+          },
+          {
+            "$ref": "#/$defs/StartInstance"
+          },
+          {
+            "$ref": "#/$defs/Parallel"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "name",
+    "bench",
+    "steps"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}
