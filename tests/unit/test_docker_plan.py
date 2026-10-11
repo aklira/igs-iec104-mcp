@@ -83,11 +83,12 @@ def test_a_point_kind_the_runtime_does_not_serve_is_refused_by_name() -> None:
     instance(data, "server-1")["points"] = [
         {"address": 1, "kind": "counter", "value": 7},
         {"address": 2, "kind": "step", "value": {"value": 1, "transient": False}},
+        {"address": 3, "kind": "bitstring", "value": 5},
     ]
     (issue,) = refused(data)
     assert "server-1" in issue
-    assert "counter, step" in issue
-    assert "Q-002" in issue
+    assert "bitstring, step" in issue
+    assert "S4" in issue
 
 
 def test_link_parameters_other_than_the_defaults_are_refused_by_name() -> None:
@@ -96,7 +97,7 @@ def test_link_parameters_other_than_the_defaults_are_refused_by_name() -> None:
     (issue,) = refused(data)
     assert "client-1" in issue
     assert "t0, k" in issue
-    assert "Q-003" in issue
+    assert "S5" in issue
 
 
 def test_a_connection_across_two_networks_is_refused_by_the_model() -> None:

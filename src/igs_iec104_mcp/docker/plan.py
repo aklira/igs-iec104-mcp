@@ -28,9 +28,10 @@ from igs_iec104_mcp.docker.specs import (
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.instance import Instance, LinkParameters, ResourceLimits
 
-# The point kinds the runtime serves (its `points.rs`). The others are refused by name.
+# The point kinds the runtime serves (its `points.rs`). The others are refused by
+# name until task S4 serves them (D-019); counter is served since S4a.
 SERVED_KINDS: frozenset[str] = frozenset(
-    {"single", "double", "normalized", "scaled", "float"}
+    {"single", "double", "normalized", "scaled", "float", "counter"}
 )
 # The link parameters the runtime uses: the defaults of §9.6, which the model carries.
 RUNTIME_PARAMETERS = LinkParameters()
@@ -196,14 +197,13 @@ def _instance_issues(instance: Instance) -> list[str]:
         issues.append(
             f"instance {instance.name!r} sets link parameters "
             f"({', '.join(differing)}) that the runtime does not take yet: use the "
-            "defaults, or see Q-003"
+            "defaults until task S5 takes the flags (D-020)"
         )
     unserved = sorted({str(point.kind) for point in instance.points} - SERVED_KINDS)
     if unserved:
         issues.append(
             f"instance {instance.name!r} has point kinds the runtime does not serve "
-            f"yet ({', '.join(unserved)}): use single, double, normalized, scaled, or "
-            "float (Q-002)"
+            f"yet ({', '.join(unserved)}) until task S4 serves them (D-019)"
         )
     return issues
 

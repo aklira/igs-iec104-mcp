@@ -20,7 +20,9 @@ use std::fmt;
 use std::path::Path;
 
 use igs_iec104::process_image::PointValue;
-use igs_iec104_codec::elements::{Diq, DoublePoint, Nva, Qds, QualityFlags, ShortFloat, Siq, Sva};
+use igs_iec104_codec::elements::{
+    Bcr, Diq, DoublePoint, Nva, Qds, QualityFlags, ShortFloat, Siq, Sva,
+};
 use igs_iec104_codec::header::InformationObjectAddress;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -48,6 +50,9 @@ pub enum Kind {
     Scaled,
     /// Short floating point: M_ME_NC_1, or M_ME_TF_1 when stamped. Its value is a finite number.
     Float,
+    /// Integrated total (a binary counter reading): M_IT_NA_1, or M_IT_TB_1 when stamped. Its
+    /// value is an integer from -2147483648 to 2147483647.
+    Counter,
 }
 
 impl Kind {
@@ -59,6 +64,7 @@ impl Kind {
             Self::Normalized => "a number from -1 up to 1, excluding 1",
             Self::Scaled => "an integer from -32768 to 32767",
             Self::Float => "a finite number",
+            Self::Counter => "an integer from -2147483648 to 2147483647",
         }
     }
 }
@@ -242,6 +248,7 @@ pub fn parse(text: &str) -> Result<Vec<PointSpec>, PointError> {
 fn check_command_and_simulation(point: &PointSpec) -> Result<(), PointError> {
     let address = point.address;
     let single_or_double = matches!(point.kind, Kind::Single | Kind::Double);
+    let measured = matches!(point.kind, Kind::Normalized | Kind::Scaled | Kind::Float);
     if point.command == CommandPolicy::Accept && !single_or_double {
         return Err(PointError::Command {
             address,
@@ -261,7 +268,7 @@ fn check_command_and_simulation(point: &PointSpec) -> Result<(), PointError> {
         SimulationKind::Toggle if !single_or_double => {
             Err(simulation_error("toggle needs a single or double point"))
         }
-        SimulationKind::Ramp | SimulationKind::Walk if single_or_double => Err(simulation_error(
+        SimulationKind::Ramp | SimulationKind::Walk if !measured => Err(simulation_error(
             "ramp and walk need a normalized, scaled, or float point",
         )),
         SimulationKind::Toggle => Ok(()),
@@ -333,6 +340,12 @@ pub fn value_of(kind: Kind, address: u32, json: &Value) -> Result<PointValue, Po
             let number = number.ok_or_else(invalid)?;
             PointValue::Float(ShortFloat::from_f32(number as f32), quality)
         }
+        Kind::Counter => {
+            let number = json.as_i64().ok_or_else(invalid)?;
+            let counter = i32::try_from(number).map_err(|_| invalid())?;
+            // The sequence number is the reading's own: a served counter starts at 0.
+            PointValue::Counter(Bcr::new(counter, 0).ok_or_else(invalid)?)
+        }
     })
 }
 
@@ -362,6 +375,7 @@ pub fn json_of(value: PointValue) -> Value {
         PointValue::Normalized(nva, _) => number(f64::from(nva.as_f32())),
         PointValue::Scaled(sva, _) => Value::from(sva.value()),
         PointValue::Float(float, _) => number(f64::from(float.as_f32())),
+        PointValue::Counter(counter) => Value::from(counter.counter()),
         _ => Value::Null,
     }
 }
@@ -458,5 +472,25 @@ mod tests {
             let value = value_of(kind, 1, &json).expect("valid");
             assert_eq!(json_of(value), json, "{kind:?}");
         }
+    }
+
+    #[test]
+    fn a_counter_point_takes_a_32_bit_integer_and_cannot_be_simulated_as_a_measure() {
+        let points =
+            parse(&file(r#"{"address": 1, "kind": "counter", "value": -5}"#)).expect("a counter");
+        assert_eq!(points[0].kind, Kind::Counter);
+        let value = points[0].point_value().expect("a value");
+        assert_eq!(json_of(value), serde_json::json!(-5));
+        for bad in [
+            r#""value": 2147483648"#,
+            r#""value": 1.5"#,
+            r#""value": true"#,
+        ] {
+            let text = format!(r#"{{"address": 1, "kind": "counter", {bad}}}"#);
+            assert!(parse(&file(&text)).is_err(), "{bad} is not a counter value");
+        }
+        let ramp = r#"{"address": 1, "kind": "counter", "value": 1,
+            "simulation": {"kind": "ramp", "period_ms": 100, "increment": 1.0}}"#;
+        assert!(parse(&file(ramp)).is_err(), "a ramp needs a measured point");
     }
 }

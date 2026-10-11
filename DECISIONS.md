@@ -362,3 +362,20 @@ test can show it.
   refusal of non-default parameters (D-016) stays until S5 is done, and is then removed.
 - Why: a bench sets the parameters in its definition, and a silent default would be wrong; the timeout and
   reconnection scenarios (E5) need the parameters.
+
+## D-021: The counter point kind (S4a) and the split of S4
+
+- Date: 2026-10-11 (task S4a).
+- Decision: the runtime serves `counter` points (M_IT_NA_1, or M_IT_TB_1 when stamped). The value is an integer
+  from -2147483648 to 2147483647; the reading's sequence number is 0 when the station serves it. The client
+  decodes a counter reading into its point image, with the invalid flag as its quality; the carry and adjusted
+  flags stay with the value. A counter cannot be simulated by a ramp or a walk, since those need a measured
+  point. An update of a counter point leaves as a spontaneous M_IT (cause 3).
+- Contract: a new point kind is an additive change, so the contract is 1.3.0 (`runtime-api.yaml`, the two
+  event schemas, and `CONTRACT_VERSION`).
+- Split of S4: S4a is the counter's station value and its client reception through an update; S4b is the
+  counter interrogation as a client action (the upstream station already answers it); S4c is `step` and
+  `bitstring`; S4d is `packed` and `normalized_unqualified`. Each part is a commit of its own.
+- Tests: `points.rs` (the value's range and form, and the ramp refusal), `image.rs` (the decoding of plain
+  and invalid counter readings), `tests/station.rs` (a counter point is served, and its update reaches a
+  client as a spontaneous counter reading).

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use igs_iec104::process_image::PointValue;
 use igs_iec104_codec::asdu::{Asdu, Body, Objects, Timed};
-use igs_iec104_codec::elements::{Diq, Qds, QualityFlags, Siq};
+use igs_iec104_codec::elements::{Bcr, Diq, Qds, QualityFlags, Siq};
 use igs_iec104_codec::formats::Cp56Time2a;
 use igs_iec104_codec::generated::profile::TypeId;
 
@@ -135,6 +135,8 @@ pub fn observations(asdu: &Asdu) -> Vec<(u32, Observed)> {
         Body::M_ME_TF_1(objects) => stamped(objects, |(float, qds)| {
             measured(PointValue::Float(float, qds), qds, None)
         }),
+        Body::M_IT_NA_1(objects) => plain(objects, |bcr| counter(bcr, None)),
+        Body::M_IT_TB_1(objects) => stamped(objects, |bcr| counter(bcr, None)),
         _ => Vec::new(),
     }
 }
@@ -197,6 +199,22 @@ fn double(diq: Diq, time: Option<Cp56Time2a>) -> Observed {
     }
 }
 
+/// A counter reading. Its invalid flag is the quality; its carry and adjusted flags stay with the
+/// value, which keeps them.
+fn counter(bcr: Bcr, time: Option<Cp56Time2a>) -> Observed {
+    Observed {
+        value: PointValue::Counter(bcr),
+        quality: Quality {
+            invalid: bcr.invalid,
+            not_topical: false,
+            substituted: false,
+            blocked: false,
+            overflow: false,
+        },
+        time,
+    }
+}
+
 fn measured(value: PointValue, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
     Observed {
         value,
@@ -240,6 +258,23 @@ mod tests {
 
     fn time() -> Cp56Time2a {
         Cp56Time2a::new(1_500, 30, 12, 11, 0, 10, 26).expect("a valid time tag")
+    }
+
+    #[test]
+    fn a_counter_reading_is_observed_with_its_invalid_flag() {
+        let reading = Bcr::new(-42, 3).expect("a counter");
+        let mut invalid = Bcr::new(9, 0).expect("a counter");
+        invalid.invalid = true;
+        let observed = observations(&asdu(
+            cause::SPONTANEOUS,
+            Body::M_IT_NA_1(individual(vec![(7, reading), (8, invalid)])),
+        ));
+        assert_eq!(observed.len(), 2);
+        assert_eq!(observed[0].0, 7);
+        assert_eq!(observed[0].1.value, PointValue::Counter(reading));
+        assert!(!observed[0].1.quality.invalid);
+        assert!(observed[1].1.quality.invalid);
+        assert_eq!(observed[1].1.time, None);
     }
 
     fn on(on: bool) -> Siq {

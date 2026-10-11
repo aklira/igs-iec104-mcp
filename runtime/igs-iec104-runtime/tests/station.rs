@@ -7,9 +7,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use common::{get, has_event, wait_for, TokenFile};
+use common::{get, has_event, post, wait_for, TokenFile};
 use igs_iec104::{Client, ClientConfig, Delivery, Event};
-use igs_iec104_codec::asdu::{Asdu, Body};
+use igs_iec104_codec::asdu::{Asdu, Body, Objects};
 use igs_iec104_codec::elements::{Qoc, Sco};
 use igs_iec104_codec::header::{cause, CommonAddress, InformationObjectAddress};
 use igs_iec104_link::TransferState;
@@ -335,5 +335,53 @@ async fn events_lost_from_a_full_stream_are_reported() {
     .await;
     assert!(body["dropped"].as_u64().unwrap_or_default() > 0, "{body}");
     drop(peers);
+    station.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_counter_point_is_served_and_its_update_reaches_the_client() {
+    let points = PointsFile::new(
+        "counter",
+        r#"{"schema_version": 1, "points": [{"address": 4, "kind": "counter", "value": 7}]}"#,
+    );
+    let token = TokenFile::new("c4-counter");
+    let station = Station::start(&points, 1024, Duration::from_secs(30), &token).await;
+    let mut client = controller(station.listen).await;
+
+    let (status, body) = get(station.control, "/v1/points/4").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["kind"], "counter");
+    assert_eq!(body["value"], 7);
+
+    let (status, _) = post(
+        station.control,
+        "/v1/points/4",
+        &serde_json::json!({"value": 9}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // The update leaves as a spontaneous counter reading (M_IT_NA_1) with the new value.
+    let reading = timeout(PATIENCE, async {
+        while let Some(event) = client.next_event().await {
+            if let Event::Delivery(Delivery::Asdu(asdu)) = event {
+                if matches!(asdu.body, Body::M_IT_NA_1(_))
+                    && asdu.body.first_address() == InformationObjectAddress::new(4)
+                {
+                    return asdu;
+                }
+            }
+        }
+        panic!("the connection ended before the reading");
+    })
+    .await
+    .expect("the reading arrives within the patience of the test");
+    let Body::M_IT_NA_1(Objects::Individual(objects)) = &reading.body else {
+        panic!("a counter reading is an individual object list");
+    };
+    assert_eq!(objects[0].value.counter(), 9);
+    assert_eq!(reading.cot.cause(), cause::SPONTANEOUS);
+
+    drop(client);
     station.stop().await;
 }
