@@ -18,7 +18,7 @@
 
 ## Q-002: point kinds of the definitions and of the runtime
 
-- Task: C4. Status: open, for the maintainer.
+- Task: C4. Status: resolved by D-019 (the maintainer chose the ten kinds, with the runtime to follow).
 - Question: the definitions accept the ten monitoring kinds of the upstream `PointValue` (§5), but the
   runtime serves five of them today (single, double, normalized, scaled, and float). A bench that uses
   step, bitstring, counter, packed, or normalized-unqualified points is valid, and fails when the runtime
@@ -30,7 +30,7 @@
 
 ## Q-003: link parameters of the runtimes
 
-- Task: D2. Status: open, for the maintainer.
+- Task: D2. Status: resolved by D-020 (the maintainer chose flags on the runtime, as a separate task).
 - Question: the definitions carry the link parameters of each instance (t0 to t3, k, w), but the runtime takes
   no flag for them: it uses the upstream defaults (§9.6). Should the runtime gain flags for the link
   parameters (a change of the runtime and of its contract, so a separate task), or should a bench keep to

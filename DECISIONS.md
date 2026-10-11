@@ -342,3 +342,23 @@ test can show it.
   target closes the client); `tests/integration/test_docker_bench.py` (a runtime publishes no port; the relay
   does; the stop keeps the relay's logs). The integration tests need `IGS_RELAY_IMAGE` as well as
   `IGS_RUNTIME_IMAGE`; the CI integration job builds both.
+
+## D-019: The point kinds of the definitions (closes Q-002)
+
+- Date: 2026-10-11.
+- Decision: the definitions accept the ten monitoring kinds of the upstream `PointValue`, as §5 asks. A bench
+  that uses a kind the runtime does not serve yet is refused by the plan, by name, before anything is created
+  (`docker/plan.py`). The runtime serves the rest in task S4: `counter` first (§7 names counter interrogation),
+  then `step`, `bitstring`, `packed`, and `normalized_unqualified`.
+- Why: the schema stays stable; a later runtime change does not change a definition; a bench that cannot run
+  fails at the plan with a clear message.
+
+## D-020: The link parameters of the runtimes (closes Q-003)
+
+- Date: 2026-10-11.
+- Decision: the runtime takes flags for the link parameters (`--t0`, `--t1`, `--t2`, `--t3`, `--k`, `--w`), in
+  the task S5. Each flag is checked with the upstream `Parameters` rules, and the defaults of §9.6 are kept when
+  a flag is absent. The API contract does not change: the flags are command-line arguments only. The plan's
+  refusal of non-default parameters (D-016) stays until S5 is done, and is then removed.
+- Why: a bench sets the parameters in its definition, and a silent default would be wrong; the timeout and
+  reconnection scenarios (E5) need the parameters.

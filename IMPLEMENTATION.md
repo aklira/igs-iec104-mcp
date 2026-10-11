@@ -464,6 +464,16 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Produce: startup reconciliation of stored state with labeled resources; inspection and explicit cleanup of recovered test benches.
 - Done when: a controller killed during a run restarts, marks the run interrupted, keeps its evidence, and does not resume commands.
 
+**S4 — Runtime point kinds** (added after D2, D-019)
+- Depends: C2, C3.
+- Produce: the runtime serves `counter`, `step`, `bitstring`, `packed`, and `normalized_unqualified` points, on the station and in the client's point image, with their time tags where the form has one. `counter` first.
+- Done when: for each kind, a station serves it, a client receives it with its value and quality, and the plan accepts a bench that uses it.
+
+**S5 — Runtime link flags** (added after D2, D-020)
+- Depends: S3.
+- Produce: the flags `--t0`, `--t1`, `--t2`, `--t3`, `--k`, `--w` on the runtime, checked with the upstream `Parameters` rules, with the defaults of §9.6 when they are absent. The plan stops refusing link parameters.
+- Done when: unit tests cover each rule of the flags, and an integration test shows that a short timeout changes the observed behaviour of a link.
+
 ### Phase E — Scenario engine (milestone 4)
 
 **E1 — Steps, cursors, and the run state machine**
@@ -574,6 +584,8 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | C5 Definition storage | [x] |
 | D1 Docker adapter and labels | [x] |
 | D2 Test bench lifecycle | [x] |
+| S4 Runtime point kinds | [ ] |
+| S5 Runtime link flags | [ ] |
 | D3 Reconciliation | [ ] |
 | E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [ ] |
