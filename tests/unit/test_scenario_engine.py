@@ -9,11 +9,13 @@ import pytest
 
 from igs_iec104_mcp.models.run import Outcome, RunStatus
 from igs_iec104_mcp.models.scenario import Scenario
+from igs_iec104_mcp.scenarios.assertions import observation_of
 from igs_iec104_mcp.scenarios.engine import (
     Context,
     Event,
     Handler,
     InvalidTransition,
+    Observation,
     RunMachine,
     StepFailed,
     execute,
@@ -48,6 +50,13 @@ class FakeRuntime:
 
     async def events_after(self, instance: str, cursor: int) -> list[Event]:
         return [e for e in self.events if e.instance == instance and e.seq > cursor]
+
+    async def image(self, instance: str, address: int) -> Observation | None:
+        last = None
+        for event in self.events:
+            if event.instance == instance and event.data.get("address") == address:
+                last = observation_of(event)
+        return last
 
 
 class CarelessRuntime(FakeRuntime):

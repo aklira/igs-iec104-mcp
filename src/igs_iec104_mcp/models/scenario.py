@@ -14,6 +14,7 @@ from pydantic import Field, StrictBool, field_validator, model_validator
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.common import (
     Address,
+    CommonAddress,
     Definition,
     DefinitionError,
     GlobalTiming,
@@ -63,7 +64,34 @@ class GeneralInterrogation(Definition):
     timeout: Timing = DEFAULT_TIMEOUT
 
 
-class AssertPoint(Definition):
+class QualityExpectation(Definition):
+    """The quality flags an observation must have. A flag that is not named is not
+    checked."""
+
+    invalid: StrictBool | None = None
+    not_topical: StrictBool | None = None
+    substituted: StrictBool | None = None
+    blocked: StrictBool | None = None
+    overflow: StrictBool | None = None
+
+
+class Expected(Definition):
+    """The conditions an observation of a point must meet, besides its value (§8). A
+    condition that is not named is not checked."""
+
+    common_address: CommonAddress | None = Field(
+        default=None, description="The common address the observation was sent to."
+    )
+    cause: int | None = Field(
+        default=None, ge=1, le=63, description="The cause of transmission (1 to 63)."
+    )
+    stamped: StrictBool | None = Field(
+        default=None, description="Whether the observation carries a time tag."
+    )
+    quality: QualityExpectation | None = None
+
+
+class AssertPoint(Expected):
     """Checks the client's point image as it stands (§8)."""
 
     action: Literal["assert_point"]
@@ -79,7 +107,7 @@ class AssertPoint(Definition):
         return self
 
 
-class ExpectPoint(Definition):
+class ExpectPoint(Expected):
     """Waits for a new observation of the client after the step's cursor (§8)."""
 
     action: Literal["expect_point"]

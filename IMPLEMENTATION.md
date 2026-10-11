@@ -486,6 +486,14 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: E1.
 - Produce: value, quality, type, common address, IOA, cause, and timestamp assertions with tolerances.
 - Done when: unit tests cover each matcher, its tolerance, and its failure message.
+- Done (D-026): the matchers and the two assertion handlers, over a source of events and point images; the
+  expected conditions added to the two steps (common address, cause, time tag, quality).
+
+**E2b — Runtime-backed observation source** (added after E2, D-026)
+- Depends: E2, S4.
+- Produce: the runtime's events carry the decoded observations of each ASDU (contract change), and a source over
+  the control client's events and point images, which the scenario engine uses against a real station.
+- Done when: an integration test runs an assertion scenario against a station and a client of the runtime.
 
 **E3 — Cancellation and cleanup**
 - Depends: E1.
@@ -589,7 +597,8 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | S5 Runtime link flags | [x] |
 | D3 Reconciliation | [ ] |
 | E1 Steps, cursors, run state machine | [x] |
-| E2 Assertions | [ ] |
+| E2 Assertions | [x] |
+| E2b Runtime-backed observation source | [ ] |
 | E3 Cancellation and cleanup | [ ] |
 | E4 Parallel branches and barriers | [ ] |
 | E5 Restart and reconnect primitives | [ ] |

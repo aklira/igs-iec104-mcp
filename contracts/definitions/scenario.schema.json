@@ -13,12 +13,64 @@
           "title": "Address",
           "type": "integer"
         },
+        "cause": {
+          "anyOf": [
+            {
+              "maximum": 63,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The cause of transmission (1 to 63).",
+          "title": "Cause"
+        },
         "client": {
           "title": "Client",
           "type": "string"
         },
+        "common_address": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The common address the observation was sent to.",
+          "title": "Common Address"
+        },
         "kind": {
           "$ref": "#/$defs/PointKind"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stamped": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the observation carries a time tag.",
+          "title": "Stamped"
         },
         "tolerance": {
           "default": 0.0,
@@ -54,12 +106,64 @@
           "title": "Address",
           "type": "integer"
         },
+        "cause": {
+          "anyOf": [
+            {
+              "maximum": 63,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The cause of transmission (1 to 63).",
+          "title": "Cause"
+        },
         "client": {
           "title": "Client",
           "type": "string"
         },
+        "common_address": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The common address the observation was sent to.",
+          "title": "Common Address"
+        },
         "kind": {
           "$ref": "#/$defs/PointKind"
+        },
+        "quality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stamped": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the observation carries a time tag.",
+          "title": "Stamped"
         },
         "timeout": {
           "default": "10s",
@@ -207,6 +311,74 @@
       ],
       "title": "PointKind",
       "type": "string"
+    },
+    "QualityExpectation": {
+      "additionalProperties": false,
+      "description": "The quality flags an observation must have. A flag that is not named is not\nchecked.",
+      "properties": {
+        "blocked": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked"
+        },
+        "invalid": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Invalid"
+        },
+        "not_topical": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Not Topical"
+        },
+        "overflow": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overflow"
+        },
+        "substituted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Substituted"
+        }
+      },
+      "title": "QualityExpectation",
+      "type": "object"
     },
     "SendCommand": {
       "additionalProperties": false,

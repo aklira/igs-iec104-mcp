@@ -1,18 +1,14 @@
 """The scenario engine: the steps of a scenario in order, with an event cursor for each
 step, a deadline for each step and one for the whole scenario, and fail-fast
-(IMPLEMENTATION.md §8; task E1).
+(IMPLEMENTATION.md §8; tasks E1 and E2).
 
 The engine knows no protocol. A step is run by the handler of its action, which the
-caller
-supplies; the handler reads the runtimes' events through a `Source`, and asserts or
-waits
-on them. The engine takes the cursor before a handler starts, and a handler only
-matches an
-event that came after its cursor, even when the source returns older ones. An action
-with
-no handler is UNSUPPORTED, never passed. The status of the run follows the states of
-§10,
-through a machine that refuses an impossible transition."""
+caller supplies. A handler reads the runtimes through a `Source`: the events after a
+cursor, and the point image. The engine takes the cursor before a handler starts, and a
+handler only matches an event that came after its cursor, even when the source returns
+older ones. An action with no handler is UNSUPPORTED, never passed. The status of the
+run follows the states of §10, through a machine that refuses an impossible transition.
+"""
 
 from __future__ import annotations
 
@@ -45,17 +41,38 @@ class Event:
     data: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Observation:
+    """A value a client received: its sequence number, its address, the type it came in,
+    its cause, its common address, its quality flags, and its time tag when it has one.
+    """
+
+    seq: int
+    address: int
+    type_id: int
+    value: Any
+    cause: int
+    common_address: int
+    quality: Mapping[str, bool]
+    time: str | None = None
+
+
 class Source(Protocol):
-    """Where the events of the runtimes come from."""
+    """Where the events and the point images of the runtimes come from."""
 
     async def last_seq(self, instance: str) -> int:
-        """The sequence number of the latest event of an instance, 0 when it has
-        none."""
+        """The sequence number of the latest event of an instance, or 0 when none."""
 
     async def events_after(self, instance: str, cursor: int) -> list[Event]:
-        """The events of an instance that came after the cursor, in order. The source
-        may
-        return more: the engine checks each sequence number again."""
+        """The events of an instance after the cursor, in order.
+
+        The source may return more: the engine checks each sequence number again.
+        """
+
+    async def image(self, instance: str, address: int) -> Observation | None:
+        """The last value an instance received at an address, as its point image holds
+        it, or None when it has none.
+        """
 
 
 class StepFailed(Exception):
@@ -63,14 +80,22 @@ class StepFailed(Exception):
 
 
 class Context:
-    """What a handler may use: the cursor of its instance, and a wait for a matching
-    event after it."""
+    """What a handler may use: the cursor of its instance, a wait for a matching event
+    after it, and the point image.
+
+    A handler may leave a note about its last check; the engine adds the note to the
+    verdict when the step's deadline passes first.
+    """
 
     def __init__(self, source: Source) -> None:
         self._source = source
+        self.note: str | None = None
 
     async def cursor(self, instance: str) -> int:
         return await self._source.last_seq(instance)
+
+    async def image(self, instance: str, address: int) -> Observation | None:
+        return await self._source.image(instance, address)
 
     async def wait_for(
         self,
@@ -78,8 +103,11 @@ class Context:
         cursor: int,
         match: Callable[[Event], bool],
     ) -> Event:
-        """The first event of the instance after the cursor that matches. An event at or
-        before the cursor is never matched. Waits until the step's deadline."""
+        """The first event of the instance after the cursor that matches.
+
+        An event at or before the cursor is never matched. Waits until the step's
+        deadline.
+        """
         while True:
             for event in await self._source.events_after(instance, cursor):
                 if event.seq > cursor and event.instance == instance and match(event):
@@ -115,7 +143,8 @@ class RunMachine:
 @dataclass(frozen=True)
 class Result:
     """How a run ended: its status, the verdicts of the steps that ended, its progress,
-    and why it ended."""
+    and why it ended.
+    """
 
     status: RunStatus
     verdicts: tuple[Verdict, ...]
@@ -128,10 +157,11 @@ async def execute(
     handlers: Mapping[str, Handler],
     source: Source,
 ) -> Result:
-    """Runs the steps of a scenario in order. Each step has its deadline; the scenario
-    has
-    its global deadline; a step that does not pass stops the run when fail-fast is
-    on."""
+    """Runs the steps of a scenario in order.
+
+    Each step has its deadline, the scenario has its global deadline, and a step that
+    does not pass stops the run when fail-fast is on.
+    """
     machine = RunMachine()
     machine.move(RunStatus.RUNNING)
     context = Context(source)
@@ -175,13 +205,17 @@ async def _run_step(
     if handler is None:
         return Outcome.UNSUPPORTED, f"the engine has no handler for {step.action!r}"
     limit = _seconds(getattr(step, "timeout", None))
+    context.note = None
     try:
         async with asyncio.timeout(limit):
             detail = await handler(step, context)
     except StepFailed as error:
         return Outcome.FAILED, str(error)
     except TimeoutError:
-        return Outcome.TIMED_OUT, _no_result(limit)
+        detail = _no_result(limit)
+        if context.note is not None:
+            detail = f"{detail}: {context.note}"
+        return Outcome.TIMED_OUT, detail
     except Exception as error:
         return Outcome.ERROR, f"{type(error).__name__}: {error}"
     return Outcome.PASSED, detail

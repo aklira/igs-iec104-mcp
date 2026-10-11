@@ -450,3 +450,23 @@ test can show it.
   `tests/unit/test_docker_plan.py` (the flags are in the arguments of a client and of a station), and
   `tests/integration/test_docker_bench.py` (a bench with non-default parameters starts, and the flags are in the
   container's command).
+
+## D-026: The assertions and the observation source (E2)
+
+- Date: 2026-10-11 (task E2).
+- Decision: the assertion matchers compare an observation with a step: the kind of the point (from its type),
+  the value (a number within the tolerance, or an exact boolean, text, or object), the common address, the cause,
+  the time tag (`stamped`), and the quality flags the step names. A condition the step does not name is not
+  checked. Each mismatch is a message that gives what was received and what was expected; a failed step lists
+  every mismatch. `assert_point` reads the point image as it stands; `expect_point` waits for an observation
+  after the step's cursor that meets all the conditions. When its deadline passes first, the verdict says what the
+  last observation lacked: the handler leaves a note on its context, which the engine adds to the TIMED_OUT verdict.
+- Models: the two assertion steps gain the optional conditions: `common_address`, `cause` (1 to 63), `stamped`, and
+  `quality` (a set of optional flags). The published scenario schema is regenerated.
+- The observation source is an interface (`Source`), tested with a fake runtime. The runtime's events do not carry
+  decoded values today (only the ASDU bytes), so a source over the control API waits for E2b, which makes the
+  runtime decode the observations into its events (a contract change), as the image already does.
+- Not in E2: the other step actions (waits, updates, commands, restarts), which come with E3 to E5.
+- Tests: `tests/unit/test_scenario_assertions.py` (each matcher with its tolerance and its message; the point image;
+  the wait that never uses an observation from before its cursor; the timeout message; a scenario of both kinds) and
+  `tests/unit/test_scenario_engine.py` (updated for the source's image).
