@@ -470,3 +470,28 @@ test can show it.
 - Tests: `tests/unit/test_scenario_assertions.py` (each matcher with its tolerance and its message; the point image;
   the wait that never uses an observation from before its cursor; the timeout message; a scenario of both kinds) and
   `tests/unit/test_scenario_engine.py` (updated for the source's image).
+
+## D-027: Cancellation and cleanup of a run (E3)
+
+- Date: 2026-10-11 (task E3).
+- Decision: a run is cancelled by setting an event that the caller holds (`execute(..., cancel=...)`). A step in
+  progress ends CANCELLED: its handler is cancelled and awaited, so its `finally` blocks run before the run ends.
+  A cancel that arrives before a step stops the run before that step (`cancelled before step N`). The steps after
+  a cancelled step do not run.
+- Cleanup: the scenario's cleanup steps run in order after success, failure, cancellation, and the global
+  deadline. They are not subject to fail-fast, each gets a verdict named `cleanup N: <action>`, and they cannot be
+  cancelled. A cleanup step always has a deadline: its own `timeout`, or `CLEANUP_SECONDS` (the default step
+  timeout, 10 seconds) when it names none. Without that bound a cleanup step could hang after the global deadline.
+- Status: an ERROR or UNSUPPORTED verdict, in a step or in cleanup, makes the run ERROR. Otherwise a cancelled run
+  is CANCELLED, even when a cleanup step failed: that failure stays in the verdicts. Otherwise a non-passed verdict
+  or the global deadline makes the run FAILED, and the run is PASSED when every verdict passed.
+- Not in E3: `execution_seconds` of an instance (D2 left it to E3). It bounds the lifetime of the bench's
+  containers, which the run controller owns (M2 and D3), so the engine does not enforce it here.
+- "Leaves no pending command": there is no command action in the engine yet. The contract is the handler's: a
+  handler holding a request must release it in a `finally` block, which a cancellation runs. A test checks this
+  with a fake request. The check must be repeated when the command handlers land.
+- Tests: `tests/unit/test_scenario_engine.py` (a cancelled step is stopped and its request closed before the run
+  ends, and the next step does not run; a cancel between steps; a cancel before the start runs only the cleanup;
+  cleanup after success, failure, and the global deadline; every cleanup step runs under fail-fast; a failed cleanup
+  step fails a passed run; an unsupported cleanup step is an error; a cleanup step is bounded by its deadline after
+  the global one).

@@ -499,6 +499,9 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: E1.
 - Produce: cancellation of a run, and cleanup steps after success, failure, or cancellation.
 - Done when: a cancelled run reports `cancelled`, runs its cleanup, and leaves no pending command.
+- Done (D-027): the cancel event, the CANCELLED outcome and status, the cleanup steps after every outcome, each
+  with a deadline. `execution_seconds` is not enforced here (it belongs to the run controller, M2 and D3), and
+  the "no pending command" check is the handler contract until command actions exist.
 
 **E4 — Parallel branches and barriers**
 - Depends: E1.
@@ -599,7 +602,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [x] |
 | E2b Runtime-backed observation source | [ ] |
-| E3 Cancellation and cleanup | [ ] |
+| E3 Cancellation and cleanup | [x] |
 | E4 Parallel branches and barriers | [ ] |
 | E5 Restart and reconnect primitives | [ ] |
 | M1 MCP server over stdio | [ ] |

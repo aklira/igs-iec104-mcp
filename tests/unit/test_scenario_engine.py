@@ -9,6 +9,7 @@ import pytest
 
 from igs_iec104_mcp.models.run import Outcome, RunStatus
 from igs_iec104_mcp.models.scenario import Scenario
+from igs_iec104_mcp.scenarios import engine
 from igs_iec104_mcp.scenarios.assertions import observation_of
 from igs_iec104_mcp.scenarios.engine import (
     Context,
@@ -310,3 +311,216 @@ async def test_a_step_without_a_deadline_is_bounded_by_the_scenario_only() -> No
     result = await execute(chain, {"start_instance": slow}, FakeRuntime())
     assert result.status is RunStatus.PASSED
     assert result.verdicts[0].detail == "slow but in time"
+
+
+# Cancellation and cleanup (E3).
+
+STOP = {"action": "stop_instance", "instance": "server-1"}
+START = {"action": "start_instance", "instance": "server-1"}
+GENERAL = {"action": "general_interrogation", "client": "client-1"}
+UPDATE = {"action": "update_point", "server": "server-1", "address": 100, "value": 1.0}
+
+
+def logging_handlers(log: list[str], **overrides: Handler) -> dict[str, Handler]:
+    """Handlers that log the action they run and pass, so that the order of the steps
+    and of the cleanup can be checked."""
+
+    def recording(action: str) -> Handler:
+        async def handler(step: Any, context: Context) -> str:
+            log.append(action)
+            return f"{action} done"
+
+        return handler
+
+    table: dict[str, Handler] = {
+        action: recording(action)
+        for action in (
+            "general_interrogation",
+            "update_point",
+            "stop_instance",
+            "start_instance",
+        )
+    }
+    table.update(overrides)
+    return table
+
+
+async def hanging(step: Any, context: Context) -> str:
+    await asyncio.sleep(10)
+    return "never"
+
+
+async def refusing(step: Any, context: Context) -> str:
+    raise StepFailed("the station refused the interrogation")
+
+
+async def test_a_cancelled_step_is_stopped_and_its_request_is_closed() -> None:
+    open_requests: set[str] = set()
+    started = asyncio.Event()
+    cancel = asyncio.Event()
+
+    async def request_then_wait(step: Any, context: Context) -> str:
+        open_requests.add("request-1")
+        try:
+            started.set()
+            return await hanging(step, context)
+        finally:
+            open_requests.discard("request-1")
+
+    async def cancel_once_started() -> None:
+        await started.wait()
+        cancel.set()
+
+    log: list[str] = []
+    canceller = asyncio.create_task(cancel_once_started())
+    result = await execute(
+        scenario([GENERAL, UPDATE]),
+        logging_handlers(log, general_interrogation=request_then_wait),
+        FakeRuntime(),
+        cancel=cancel,
+    )
+    await canceller
+    assert result.status is RunStatus.CANCELLED
+    assert [v.outcome for v in result.verdicts] == [Outcome.CANCELLED]
+    assert result.verdicts[0].detail == "cancelled during this step"
+    assert result.reason == "cancelled during step 1"
+    assert (result.progress.completed, result.progress.total) == (1, 2)
+    assert open_requests == set(), "the handler's finally ran before the run ended"
+    assert log == [], "the step after the cancelled one did not run"
+
+
+async def test_a_cancel_between_steps_stops_before_the_next_step() -> None:
+    cancel = asyncio.Event()
+    log: list[str] = []
+
+    async def first(step: Any, context: Context) -> str:
+        log.append("first")
+        cancel.set()
+        return "first done"
+
+    result = await execute(
+        scenario([GENERAL, UPDATE]),
+        logging_handlers(log, general_interrogation=first),
+        FakeRuntime(),
+        cancel=cancel,
+    )
+    assert log == ["first"]
+    assert [v.outcome for v in result.verdicts] == [Outcome.PASSED]
+    assert result.status is RunStatus.CANCELLED
+    assert result.reason == "cancelled before step 2"
+    assert (result.progress.completed, result.progress.total) == (1, 2)
+
+
+async def test_a_run_cancelled_before_it_starts_runs_only_its_cleanup() -> None:
+    cancel = asyncio.Event()
+    cancel.set()
+    log: list[str] = []
+    result = await execute(
+        scenario([GENERAL], cleanup=[STOP]),
+        logging_handlers(log),
+        FakeRuntime(),
+        cancel=cancel,
+    )
+    assert log == ["stop_instance"]
+    assert [v.step for v in result.verdicts] == ["cleanup 1: stop_instance"]
+    assert result.status is RunStatus.CANCELLED
+    assert result.reason == "cancelled before step 1"
+    assert (result.progress.completed, result.progress.total) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    "first,global_timeout,expected_status,expected_outcome",
+    [
+        (passing(), None, RunStatus.PASSED, Outcome.PASSED),
+        (refusing, None, RunStatus.FAILED, Outcome.FAILED),
+        (hanging, "200ms", RunStatus.FAILED, Outcome.TIMED_OUT),
+    ],
+    ids=["success", "failure", "global-deadline"],
+)
+async def test_cleanup_runs_after_success_failure_and_the_global_deadline(
+    first: Handler,
+    global_timeout: str | None,
+    expected_status: RunStatus,
+    expected_outcome: Outcome,
+) -> None:
+    log: list[str] = []
+    result = await execute(
+        scenario([GENERAL], cleanup=[STOP], global_timeout=global_timeout),
+        logging_handlers(log, general_interrogation=first),
+        FakeRuntime(),
+    )
+    assert log == ["stop_instance"]
+    assert result.status is expected_status
+    assert [v.outcome for v in result.verdicts] == [expected_outcome, Outcome.PASSED]
+    assert result.verdicts[-1].step == "cleanup 1: stop_instance"
+
+
+async def test_every_cleanup_step_runs_even_with_fail_fast() -> None:
+    log: list[str] = []
+    result = await execute(
+        scenario([GENERAL, UPDATE], cleanup=[STOP, START]),
+        logging_handlers(log, general_interrogation=refusing),
+        FakeRuntime(),
+    )
+    assert log == ["stop_instance", "start_instance"]
+    assert [v.outcome for v in result.verdicts] == [
+        Outcome.FAILED,
+        Outcome.PASSED,
+        Outcome.PASSED,
+    ]
+    assert result.reason == "stopped after step 1: fail-fast"
+    assert result.status is RunStatus.FAILED
+    assert result.progress.completed == 1
+
+
+async def test_a_failed_cleanup_step_fails_a_run_that_passed() -> None:
+    result = await execute(
+        scenario([GENERAL], cleanup=[STOP]),
+        logging_handlers([], stop_instance=refusing),
+        FakeRuntime(),
+    )
+    assert [v.outcome for v in result.verdicts] == [Outcome.PASSED, Outcome.FAILED]
+    assert result.status is RunStatus.FAILED
+    assert result.progress.completed == 1
+
+
+async def test_an_unsupported_cleanup_step_is_an_error() -> None:
+    result = await execute(
+        scenario(
+            [GENERAL],
+            cleanup=[
+                {
+                    "action": "send_command",
+                    "target": "client-1",
+                    "address": 1,
+                    "command": "single",
+                    "value": True,
+                    "select": True,
+                }
+            ],
+        ),
+        logging_handlers([]),
+        FakeRuntime(),
+    )
+    assert [v.outcome for v in result.verdicts] == [Outcome.PASSED, Outcome.UNSUPPORTED]
+    assert result.status is RunStatus.ERROR
+
+
+async def test_a_cleanup_step_is_bounded_by_its_deadline_after_the_global_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(engine, "CLEANUP_SECONDS", 0.1)
+    result = await asyncio.wait_for(
+        execute(
+            scenario([GENERAL], cleanup=[STOP], global_timeout="200ms"),
+            logging_handlers([], general_interrogation=hanging, stop_instance=hanging),
+            FakeRuntime(),
+        ),
+        5,
+    )
+    assert [v.outcome for v in result.verdicts] == [
+        Outcome.TIMED_OUT,
+        Outcome.TIMED_OUT,
+    ]
+    assert result.verdicts[1].detail == "no result within 0.1 s"
+    assert result.status is RunStatus.FAILED

@@ -1,6 +1,6 @@
 """The scenario engine: the steps of a scenario in order, with an event cursor for each
-step, a deadline for each step and one for the whole scenario, and fail-fast
-(IMPLEMENTATION.md §8; tasks E1 and E2).
+step, a deadline for each step and one for the whole scenario, fail-fast, cancellation,
+and the cleanup steps (IMPLEMENTATION.md §8 and §10; tasks E1, E2, and E3).
 
 The engine knows no protocol. A step is run by the handler of its action, which the
 caller supplies. A handler reads the runtimes through a `Source`: the events after a
@@ -8,6 +8,13 @@ cursor, and the point image. The engine takes the cursor before a handler starts
 handler only matches an event that came after its cursor, even when the source returns
 older ones. An action with no handler is UNSUPPORTED, never passed. The status of the
 run follows the states of §10, through a machine that refuses an impossible transition.
+
+A run is cancelled by setting the `cancel` event the caller holds. The step in progress
+then ends CANCELLED: its handler is cancelled and awaited, so that its `finally` blocks
+run before the run ends, and the steps after it do not start. The cleanup steps run
+after success, failure, cancellation, and the global deadline, in order, whatever the
+fail-fast setting. A cleanup step cannot be cancelled, and it always has a deadline: its
+own, or `CLEANUP_SECONDS` when it has none.
 """
 
 from __future__ import annotations
@@ -25,9 +32,11 @@ from igs_iec104_mcp.models.run import (
     RunStatus,
     Verdict,
 )
-from igs_iec104_mcp.models.scenario import Scenario, Step
+from igs_iec104_mcp.models.scenario import DEFAULT_TIMEOUT, Scenario, Step
 
 POLL_SECONDS = 0.05
+# The deadline of a cleanup step that names none: the default step timeout (D-027).
+CLEANUP_SECONDS = duration_seconds(DEFAULT_TIMEOUT)
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,10 @@ class InvalidTransition(Exception):
     """A run cannot move to that status from its current one."""
 
 
+class _Cancelled(Exception):
+    """The run was cancelled during a step."""
+
+
 TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.PENDING: frozenset({RunStatus.RUNNING}),
     RunStatus.RUNNING: frozenset(TERMINAL),
@@ -142,8 +155,8 @@ class RunMachine:
 
 @dataclass(frozen=True)
 class Result:
-    """How a run ended: its status, the verdicts of the steps that ended, its progress,
-    and why it ended.
+    """How a run ended: its status, the verdicts of its steps and cleanup steps that
+    ended, its progress, and why it ended.
     """
 
     status: RunStatus
@@ -152,63 +165,130 @@ class Result:
     reason: str
 
 
+@dataclass
+class _Ledger:
+    """What a run has done so far: its verdicts, the step in progress, and its end."""
+
+    verdicts: list[Verdict] = field(default_factory=list)
+    completed: int = 0
+    current: tuple[int, Step] | None = None
+    reason: str = ""
+    global_deadline: bool = False
+    cancelled: bool = False
+
+
 async def execute(
     scenario: Scenario,
     handlers: Mapping[str, Handler],
     source: Source,
+    *,
+    cancel: asyncio.Event | None = None,
 ) -> Result:
-    """Runs the steps of a scenario in order.
+    """Runs the steps of a scenario in order, then its cleanup steps.
 
     Each step has its deadline, the scenario has its global deadline, and a step that
-    does not pass stops the run when fail-fast is on.
+    does not pass stops the run when fail-fast is on. Setting the `cancel` event stops
+    the run: the step in progress ends CANCELLED, and the steps after it do not run.
     """
     machine = RunMachine()
     machine.move(RunStatus.RUNNING)
     context = Context(source)
-    verdicts: list[Verdict] = []
-    total = len(scenario.steps)
-    reason = ""
-    global_deadline = False
-    pending: tuple[int, Step] | None = None
+    ledger = _Ledger()
     try:
         async with asyncio.timeout(_seconds(scenario.global_timeout)):
-            for index, step in enumerate(scenario.steps):
-                pending = (index, step)
-                outcome, detail = await _run_step(step, handlers, context)
-                verdicts.append(_verdict(index, step, outcome, detail))
-                pending = None
-                if outcome is not Outcome.PASSED and scenario.fail_fast:
-                    reason = f"stopped after step {index + 1}: fail-fast"
-                    break
+            await _steps(scenario, handlers, context, cancel, ledger)
     except TimeoutError:
-        global_deadline = True
-        reason = "the scenario's global deadline passed"
-        if pending is not None:
-            index, step = pending
-            verdicts.append(
-                _verdict(index, step, Outcome.TIMED_OUT, reason + " during this step")
+        ledger.global_deadline = True
+        ledger.reason = "the scenario's global deadline passed"
+        if ledger.current is not None:
+            index, step = ledger.current
+            ledger.current = None
+            ledger.completed += 1
+            ledger.verdicts.append(
+                _verdict(
+                    f"step {index + 1}",
+                    step,
+                    Outcome.TIMED_OUT,
+                    f"{ledger.reason} during this step",
+                )
             )
-    status = _status(verdicts, global_deadline=global_deadline)
+    await _cleanup(scenario, handlers, context, ledger)
+    status = _status(
+        ledger.verdicts,
+        global_deadline=ledger.global_deadline,
+        cancelled=ledger.cancelled,
+    )
     machine.move(status)
     return Result(
         status=status,
-        verdicts=tuple(verdicts),
-        progress=Progress(completed=len(verdicts), total=total),
-        reason=reason or _summary(status),
+        verdicts=tuple(ledger.verdicts),
+        progress=Progress(completed=ledger.completed, total=len(scenario.steps)),
+        reason=ledger.reason or _summary(status),
     )
 
 
+async def _steps(
+    scenario: Scenario,
+    handlers: Mapping[str, Handler],
+    context: Context,
+    cancel: asyncio.Event | None,
+    ledger: _Ledger,
+) -> None:
+    """Runs the steps in order, until one of them ends the run."""
+    for index, step in enumerate(scenario.steps):
+        if cancel is not None and cancel.is_set():
+            ledger.cancelled = True
+            ledger.reason = f"cancelled before step {index + 1}"
+            return
+        ledger.current = (index, step)
+        outcome, detail = await _run_step(step, handlers, context, cancel)
+        ledger.current = None
+        ledger.completed += 1
+        ledger.verdicts.append(_verdict(f"step {index + 1}", step, outcome, detail))
+        if outcome is Outcome.CANCELLED:
+            ledger.cancelled = True
+            ledger.reason = f"cancelled during step {index + 1}"
+            return
+        if outcome is not Outcome.PASSED and scenario.fail_fast:
+            ledger.reason = f"stopped after step {index + 1}: fail-fast"
+            return
+
+
+async def _cleanup(
+    scenario: Scenario,
+    handlers: Mapping[str, Handler],
+    context: Context,
+    ledger: _Ledger,
+) -> None:
+    """Runs every cleanup step, in order, whatever the run did so far. A cleanup step is
+    not cancelled, and it has a deadline of its own."""
+    for index, step in enumerate(scenario.cleanup):
+        outcome, detail = await _run_step(
+            step, handlers, context, None, default_limit=CLEANUP_SECONDS
+        )
+        ledger.verdicts.append(_verdict(f"cleanup {index + 1}", step, outcome, detail))
+
+
 async def _run_step(
-    step: Step, handlers: Mapping[str, Handler], context: Context
+    step: Step,
+    handlers: Mapping[str, Handler],
+    context: Context,
+    cancel: asyncio.Event | None,
+    *,
+    default_limit: float | None = None,
 ) -> tuple[Outcome, str]:
     handler = handlers.get(step.action)
     if handler is None:
         return Outcome.UNSUPPORTED, f"the engine has no handler for {step.action!r}"
     limit = _seconds(getattr(step, "timeout", None))
+    if limit is None:
+        limit = default_limit
     context.note = None
     try:
         async with asyncio.timeout(limit):
-            detail = await handler(step, context)
+            detail = await _until_cancelled(handler(step, context), cancel)
+    except _Cancelled:
+        return Outcome.CANCELLED, "cancelled during this step"
     except StepFailed as error:
         return Outcome.FAILED, str(error)
     except TimeoutError:
@@ -221,6 +301,32 @@ async def _run_step(
     return Outcome.PASSED, detail
 
 
+async def _until_cancelled(
+    awaitable: Awaitable[str], cancel: asyncio.Event | None
+) -> str:
+    """Awaits the handler of a step, unless the run is cancelled first.
+
+    A handler that is cancelled is awaited until it ends, so that its `finally` blocks
+    run before the step does.
+    """
+    if cancel is None:
+        return await awaitable
+    work: asyncio.Future[str] = asyncio.ensure_future(awaitable)
+    stop: asyncio.Future[Any] = asyncio.ensure_future(cancel.wait())
+    try:
+        await asyncio.wait({work, stop}, return_when=asyncio.FIRST_COMPLETED)
+        if not work.done():
+            raise _Cancelled
+        return work.result()
+    finally:
+        stop.cancel()
+        if not work.done():
+            work.cancel()
+            await asyncio.wait({work})
+        if work.done() and not work.cancelled():
+            work.exception()
+
+
 def _no_result(limit: float | None) -> str:
     if limit is None:
         return "no result before the deadline"
@@ -231,16 +337,18 @@ def _seconds(value: str | None) -> float | None:
     return None if value is None else duration_seconds(value)
 
 
-def _verdict(index: int, step: Step, outcome: Outcome, detail: str) -> Verdict:
-    return Verdict(
-        step=f"step {index + 1}: {step.action}", outcome=outcome, detail=detail
-    )
+def _verdict(where: str, step: Step, outcome: Outcome, detail: str) -> Verdict:
+    return Verdict(step=f"{where}: {step.action}", outcome=outcome, detail=detail)
 
 
-def _status(verdicts: list[Verdict], *, global_deadline: bool) -> RunStatus:
+def _status(
+    verdicts: list[Verdict], *, global_deadline: bool, cancelled: bool
+) -> RunStatus:
     outcomes = {verdict.outcome for verdict in verdicts}
     if outcomes & {Outcome.ERROR, Outcome.UNSUPPORTED}:
         return RunStatus.ERROR
+    if cancelled:
+        return RunStatus.CANCELLED
     if global_deadline or outcomes - {Outcome.PASSED}:
         return RunStatus.FAILED
     return RunStatus.PASSED
@@ -250,5 +358,6 @@ def _summary(status: RunStatus) -> str:
     return {
         RunStatus.PASSED: "every step passed",
         RunStatus.FAILED: "a step did not pass",
+        RunStatus.CANCELLED: "the run was cancelled",
         RunStatus.ERROR: "a step could not be judged",
     }.get(status, str(status))
