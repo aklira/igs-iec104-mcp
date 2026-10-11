@@ -8,10 +8,23 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+axum = "0.8"
 # Pinned by revision (IMPLEMENTATION.md §4, decision D-004). Cargo resolves the other crates of
 # that repository from the same revision.
 igs-iec104 = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc824fcbc750262a5c8505c8812457d200c1" }
+# The codec and link crates of the same repository, at the same revision (IMPLEMENTATION.md §4):
+# the runtime names their types (CommonAddress, Qoi, Asdu, TransferState).
+igs-iec104-codec = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc824fcbc750262a5c8505c8812457d200c1" }
+igs-iec104-link = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc824fcbc750262a5c8505c8812457d200c1" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
 
 [[bin]]
 name = "igs-iec104-runtime"
 path = "src/main.rs"
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "test-util"] }

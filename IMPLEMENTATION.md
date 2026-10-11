@@ -564,7 +564,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | U2 Server connection events (upstream) ⛔ | [x] |
 | U3 Client command policy on disconnect (upstream) ⛔ | [x] |
 | U4 Supported action matrix (upstream) ⛔ | [x] |
-| S1 Runtime, client role | [ ] |
+| S1 Runtime, client role | [x] |
 | S2 Runtime, server role | [ ] |
 | S3 Minimal Python control path | [ ] |
 | C1 Runtime API and event contract | [ ] |
