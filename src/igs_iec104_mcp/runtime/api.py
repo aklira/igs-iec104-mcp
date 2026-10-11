@@ -53,6 +53,10 @@ class ControlClient:
     async def point(self, address: int) -> dict[str, Any]:
         return await self._call("GET", f"/v1/points/{address}")
 
+    async def image_points(self) -> dict[str, Any]:
+        """The point image of a client: the last value of each point (task C2)."""
+        return await self._call("GET", "/v1/image/points")
+
     async def update_point(self, address: int, value: Any) -> dict[str, Any]:
         return await self._call("POST", f"/v1/points/{address}", json={"value": value})
 

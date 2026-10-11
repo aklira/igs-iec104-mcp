@@ -495,3 +495,31 @@ test can show it.
   cleanup after success, failure, and the global deadline; every cleanup step runs under fail-fast; a failed cleanup
   step fails a passed run; an unsupported cleanup step is an error; a cleanup step is bounded by its deadline after
   the global one).
+
+## D-028: The runtime's point events and the source over the control API (E2b)
+
+- Date: 2026-10-11 (task E2b). Contract 1.7.0.
+- Decision: the client runtime records one `point` event per decoded value of each ASDU, right after the `asdu`
+  event that carried it (`points_of` in `events.rs`, the decoding of the point image). Each point event carries
+  its address, type identification, value (as the image reports it), cause, common address, quality, and time tag.
+  The engine matches one observation per event with its own sequence number, so the values are not nested in the
+  `asdu` event.
+- Contract (1.7.0): `events.schema.json` gains the `Point` definition; the `ImagePoint` of `runtime-api.yaml` gains
+  `common_address`, so that an assertion on the image has the same fields as one on an event. The versions of the
+  three contract files and of `CONTRACT_VERSION` move together.
+- Source: `runtime/source.py` (`ControlSource`) implements the engine's `Source` over the control clients of the
+  client runtimes, one per scenario instance. An image point has no sequence number, so `Observation.seq` is
+  now None for it.
+- Known limits, to address later: `last_seq` reads every kept event (the route has no cheaper query), and the
+  source does not see the events dropped from the runtime's log; a step that waits for a dropped event times out
+  rather than failing. The point events double the number of events of a station with many points, so the event
+  log (10000 by default) fills sooner; the reader sees the drop through `dropped`.
+- The Rust contract checker (`tests/contract.rs`) reads no `anyOf`, so the `value` of a point has no type in the
+  schema: the Python contract test (full JSON Schema) is the stricter check.
+- Tests: `runtime/.../tests/client_role.rs` (the point event follows its ASDU with the same cause, common address,
+  and value; the image holds the common address); `tests/contract.rs` (the `point` sample matches its definition);
+  `tests/unit/test_runtime_source.py` (the mapping of events and image points, the cursor, an unknown instance);
+  `tests/integration/test_runtime_scenario.py` (an assertion scenario against a station and a client: a passing
+  scenario with an expectation of a spontaneous update; a wrong value times out and says what arrived; the image
+  reports a wrong value and a wrong cause); `tests/integration/test_contract.py` (the events of a client include a
+  `point`).

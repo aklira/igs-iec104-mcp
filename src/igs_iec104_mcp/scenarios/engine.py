@@ -54,9 +54,11 @@ class Event:
 class Observation:
     """A value a client received: its sequence number, its address, the type it came in,
     its cause, its common address, its quality flags, and its time tag when it has one.
+
+    The sequence number is None for a value read from the point image, which keeps none.
     """
 
-    seq: int
+    seq: int | None
     address: int
     type_id: int
     value: Any

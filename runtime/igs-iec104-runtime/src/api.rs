@@ -24,12 +24,11 @@ use tokio::sync::oneshot;
 use crate::client_role::{self, Refusal, Request as ClientRequest, Status};
 use crate::correlation::{CancelError, Outcome, View};
 use crate::events::Recorded;
-use crate::image::Point;
+use crate::image::{time_text, Point};
 use crate::lock;
 use crate::points::{self, PointSpec};
 use crate::runtime::{ClientLink, ServerLink, Shared};
 use crate::station_log::StationRecorded;
-use igs_iec104_codec::formats::Cp56Time2a;
 use std::time::Duration;
 
 /// The routes of the control API.
@@ -281,37 +280,16 @@ fn no_request(id: RequestId) -> Response {
     (StatusCode::NOT_FOUND, Json(body)).into_response()
 }
 
-/// A time tag as text: `20yy-mm-ddThh:mm:ss.mmm`, with the two-digit year of CP56Time2a read as
-/// 2000 plus that year.
-fn time_text(time: Cp56Time2a) -> String {
-    let milliseconds = u32::from(time.milliseconds());
-    format!(
-        "20{:02}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
-        time.year(),
-        time.month(),
-        time.day_of_month(),
-        time.hours(),
-        time.minutes(),
-        milliseconds / 1000,
-        milliseconds % 1000,
-    )
-}
-
 /// A point of the client's image as the control API reports it.
 fn image_view(address: u32, point: &Point) -> Value {
     json!({
         "address": address,
         "type_id": point.type_id as u8,
         "value": points::json_of(point.value),
-        "quality": {
-            "invalid": point.quality.invalid,
-            "not_topical": point.quality.not_topical,
-            "substituted": point.quality.substituted,
-            "blocked": point.quality.blocked,
-            "overflow": point.quality.overflow,
-        },
+        "quality": point.quality,
         "time": point.time.map(time_text),
         "cause": point.cause,
+        "common_address": point.common_address,
         "observed_at_ms": point.observed_at_ms,
         "generation": point.generation,
     })

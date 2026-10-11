@@ -24,7 +24,7 @@ use tokio::time::Instant as TokioInstant;
 use crate::correlation::{
     Correlator, Finished, Kind, Outcome, RequestId, SubmitError, MAX_IN_FLIGHT,
 };
-use crate::events::{now_ms, AsduView, EventKind, EventLog};
+use crate::events::{now_ms, points_of, AsduView, EventKind, EventLog};
 use crate::image::PointImage;
 use crate::lock;
 
@@ -347,6 +347,9 @@ fn record(recorder: &Recorder, event: &Event) {
     update(&mut lock(&recorder.status), &kind);
     push(recorder, kind, generation);
     if let Event::Delivery(Delivery::Asdu(asdu)) = event {
+        for point in points_of(asdu) {
+            push(recorder, point, generation);
+        }
         ended = lock(&recorder.correlation).answer(asdu);
     }
     finish(recorder, &ended);

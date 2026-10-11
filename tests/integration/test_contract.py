@@ -192,7 +192,7 @@ async def check_client(contract: Any, c: httpx.AsyncClient) -> None:
     status, body, _ = await call(c, "GET", "/v1/events")
     check(contract, "/v1/events", "get", status, body)
     kinds = {event["kind"] for event in body["events"]}
-    assert {"connected", "transfer", "asdu"} <= kinds
+    assert {"connected", "transfer", "asdu", "point"} <= kinds
 
     status, body, _ = await call(c, "POST", "/v1/points/1", {"value": True})
     check(contract, "/v1/points/{address}", "post", status, body)

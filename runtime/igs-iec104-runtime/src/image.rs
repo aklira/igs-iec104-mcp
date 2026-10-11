@@ -12,9 +12,10 @@ use igs_iec104_codec::asdu::{Asdu, Body, Objects, Timed};
 use igs_iec104_codec::elements::{Bcr, Bsi, Diq, Nva, Qds, QualityFlags, Scd, Siq, Vti};
 use igs_iec104_codec::formats::Cp56Time2a;
 use igs_iec104_codec::generated::profile::TypeId;
+use serde::Serialize;
 
 /// The quality of a value: the flags of the quality descriptor, and the overflow of a measured value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Quality {
     /// IV: the value is invalid.
     pub invalid: bool,
@@ -60,6 +61,8 @@ pub struct Point {
     pub type_id: TypeId,
     /// The cause of transmission of that ASDU.
     pub cause: u8,
+    /// The common address of that ASDU.
+    pub common_address: u16,
     /// The quality of the value.
     pub quality: Quality,
     /// The time tag, for a time-tagged type.
@@ -89,6 +92,7 @@ impl PointImage {
                     value: value.value,
                     type_id: asdu.type_id(),
                     cause: asdu.cot.cause(),
+                    common_address: asdu.common_address.value(),
                     quality: value.quality,
                     time: value.time,
                     observed_at_ms,
@@ -108,6 +112,22 @@ impl PointImage {
     pub fn iter(&self) -> impl Iterator<Item = (u32, &Point)> {
         self.points.iter().map(|(address, point)| (*address, point))
     }
+}
+
+/// A time tag as the control API reports it: `YYYY-MM-DDTHH:MM:SS.mmm`, with the year read as
+/// 2000 plus the CP56Time2a year.
+pub fn time_text(time: Cp56Time2a) -> String {
+    let milliseconds = u32::from(time.milliseconds());
+    format!(
+        "20{:02}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+        time.year(),
+        time.month(),
+        time.day_of_month(),
+        time.hours(),
+        time.minutes(),
+        milliseconds / 1000,
+        milliseconds % 1000,
+    )
 }
 
 /// The values an ASDU carries, by address. An ASDU of a type the image does not hold gives none.

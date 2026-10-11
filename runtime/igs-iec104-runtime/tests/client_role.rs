@@ -121,6 +121,40 @@ async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_inter
     assert!(asdus.iter().any(|asdu| asdu["cause"] == 10));
     assert!(asdus.iter().all(|asdu| asdu["bytes_hex"].is_string()));
 
+    // The value of the point is also an event of its own, recorded right after its ASDU (E2b).
+    let recorded = events["events"].as_array().expect("the events are a list");
+    let asdu_at = recorded
+        .iter()
+        .position(|event| {
+            event["kind"] == "asdu" && event["asdu"]["type_id"] == 1 && event["asdu"]["cause"] == 20
+        })
+        .expect("the single-point ASDU is recorded");
+    let point = &recorded[asdu_at + 1];
+    assert_eq!(point["kind"], "point");
+    assert_eq!(point["address"], 1);
+    assert_eq!(point["type_id"], 1);
+    assert_eq!(point["value"], true);
+    assert_eq!(point["cause"], 20);
+    assert_eq!(point["common_address"], 1);
+    assert_eq!(point["time"], serde_json::Value::Null);
+    assert_eq!(point["quality"]["invalid"], false);
+    assert_eq!(
+        point["seq"].as_u64(),
+        recorded[asdu_at]["seq"].as_u64().map(|seq| seq + 1)
+    );
+
+    // The point image holds the same point, with its common address.
+    let (status, image) = send(control, "GET", "/v1/image/points", None).await;
+    assert_eq!(status, 200);
+    let stored = image["points"]
+        .as_array()
+        .expect("the image is a list")
+        .iter()
+        .find(|point| point["address"] == 1)
+        .expect("the image holds point 1");
+    assert_eq!(stored["value"], true);
+    assert_eq!(stored["common_address"], 1);
+
     assert_eq!(events["first_seq"], 1);
     assert_eq!(events["dropped"], 0);
 

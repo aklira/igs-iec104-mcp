@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use igs_iec104_runtime::events::{AsduView, EventKind, EventLog};
+use igs_iec104_runtime::image::Quality;
 use igs_iec104_runtime::station_log::{StationEventKind, StationLog};
 use serde_json::{json, Value};
 
@@ -42,6 +43,21 @@ fn samples() -> Vec<EventKind> {
         },
         EventKind::Transfer { state: "started" },
         EventKind::Asdu { asdu: view() },
+        EventKind::Point {
+            address: 100,
+            type_id: 13,
+            value: json!(12.5),
+            cause: 3,
+            common_address: 1,
+            quality: Quality {
+                invalid: false,
+                not_topical: false,
+                substituted: false,
+                blocked: false,
+                overflow: false,
+            },
+            time: Some("2026-10-11T12:00:00.250".to_owned()),
+        },
         EventKind::Transmitted { asdu: view() },
         EventKind::Rejected {
             detail: "TransferStopped".to_owned(),
@@ -70,6 +86,7 @@ fn definition_of(kind: &str) -> Option<&'static str> {
         "discarded" => "Discarded",
         "transfer" => "Transfer",
         "asdu" => "Asdu",
+        "point" => "Point",
         "transmitted" => "Transmitted",
         "rejected" => "Rejected",
         "unacknowledged" => "Unacknowledged",

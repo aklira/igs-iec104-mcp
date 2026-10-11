@@ -494,6 +494,8 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Produce: the runtime's events carry the decoded observations of each ASDU (contract change), and a source over
   the control client's events and point images, which the scenario engine uses against a real station.
 - Done when: an integration test runs an assertion scenario against a station and a client of the runtime.
+- Done (D-028): each decoded value is a `point` event after its ASDU (contract 1.7.0), the image point carries
+  the common address, and `ControlSource` reads both. The scenario runs against a real station and client.
 
 **E3 — Cancellation and cleanup**
 - Depends: E1.
@@ -601,7 +603,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | D3 Reconciliation | [ ] |
 | E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [x] |
-| E2b Runtime-backed observation source | [ ] |
+| E2b Runtime-backed observation source | [x] |
 | E3 Cancellation and cleanup | [x] |
 | E4 Parallel branches and barriers | [ ] |
 | E5 Restart and reconnect primitives | [ ] |

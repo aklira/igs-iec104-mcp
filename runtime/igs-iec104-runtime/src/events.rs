@@ -8,6 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use igs_iec104_codec::asdu::Asdu;
 use serde::Serialize;
+use serde_json::Value;
+
+use crate::image::{self, Quality};
+use crate::points;
 
 /// An event as the control API reports it. The variants are part of the API until C1 fixes its
 /// schema.
@@ -41,6 +45,24 @@ pub enum EventKind {
     Asdu {
         /// The ASDU.
         asdu: AsduView,
+    },
+    /// A point value that an ASDU of the station carried, decoded: one event per point, recorded
+    /// right after the ASDU that carried it (task E2b).
+    Point {
+        /// The information object address of the point.
+        address: u32,
+        /// The type identification of the ASDU.
+        type_id: u8,
+        /// The value, in the form of its kind.
+        value: Value,
+        /// The cause of transmission of the ASDU, without the P/N and test bits.
+        cause: u8,
+        /// The common address of the ASDU.
+        common_address: u16,
+        /// The quality of the value.
+        quality: Quality,
+        /// The time tag, for a time-tagged type.
+        time: Option<String>,
     },
     /// An ASDU of this client was written to the connection.
     Transmitted {
@@ -104,6 +126,22 @@ impl AsduView {
             bytes_hex: asdu.to_vec().ok().map(|bytes| hex(&bytes)),
         }
     }
+}
+
+/// The point events of an ASDU: one per value it carries, in the order of the ASDU.
+pub fn points_of(asdu: &Asdu) -> Vec<EventKind> {
+    image::observations(asdu)
+        .into_iter()
+        .map(|(address, observed)| EventKind::Point {
+            address,
+            type_id: asdu.type_id() as u8,
+            value: points::json_of(observed.value),
+            cause: asdu.cot.cause(),
+            common_address: asdu.common_address.value(),
+            quality: observed.quality,
+            time: observed.time.map(image::time_text),
+        })
+        .collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
