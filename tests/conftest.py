@@ -43,13 +43,27 @@ class Contract:
             name = response["$ref"].rsplit("/", 1)[-1]
             response = self.api["components"]["responses"][name]
         schema: dict[str, Any] = response["content"]["application/json"]["schema"]
-        # A reference inside the API document is resolved against its file.
-        if "$ref" in schema and schema["$ref"].startswith("#/"):
-            return {"$ref": f"{API_FILE}{schema['$ref']}"}
-        return schema
+        resolved: dict[str, Any] = _resolve_in_api(schema)
+        return resolved
 
     def documents_status(self, template: str, method: str, status: int) -> bool:
         return str(status) in self.api["paths"][template][method.lower()]["responses"]
+
+
+def _resolve_in_api(node: Any) -> Any:
+    """Points the references of the API document at its file, so that they resolve."""
+    if isinstance(node, dict):
+        return {
+            key: (
+                f"{API_FILE}{value}"
+                if key == "$ref" and isinstance(value, str) and value.startswith("#/")
+                else _resolve_in_api(value)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_resolve_in_api(item) for item in node]
+    return node
 
 
 @pytest.fixture(scope="session")

@@ -1,135 +1,124 @@
 openapi: 3.1.0
 info:
   title: igs-iec104-runtime control API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
-    The control API of one runtime, used by the controller only (IMPLEMENTATION.md §3). A runtime
-    runs as a client of one station or as a station. Every route needs the control token. A request
-    to the client is acknowledged when it is queued (202); its outcome comes as events. The events
-    are described by events.schema.json, which carries the same contract version.
+    The control API of one runtime, used by the controller only (IMPLEMENTATION.md §3). A runtime runs as a client of one station or as a station. Every route needs the control token. A request to the client is acknowledged when it is queued (202), with its identity; its outcome comes as events, and as its request record. The events are described by events.schema.json, which carries the same contract version.
 servers:
-  - url: http://{control_address}
-    description: The control address the runtime reports on readiness.
-    variables:
-      control_address:
-        default: 127.0.0.1:0
-        description: The address the runtime listens on, as it reported it.
+- url: http://{control_address}
+  description: The control address the runtime reports on readiness.
+  variables:
+    control_address:
+      default: 127.0.0.1:0
+      description: The address the runtime listens on, as it reported it.
 security:
-  - ControlToken: []
+- ControlToken: []
 paths:
   /v1/ready:
     get:
       operationId: ready
-      summary: "Readiness: the role, the control address, and the state of the role."
+      summary: 'Readiness: the role, the control address, and the state of the role.'
       responses:
-        "200":
+        '200':
           description: The runtime is ready.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ready"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+                $ref: '#/components/schemas/Ready'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /v1/transfer/start:
     post:
       operationId: startTransfer
       summary: Start the data transfer of the client (STARTDT act).
       responses:
-        "202":
-          description: The request is queued. Its outcome comes as events.
+        '202':
+          description: The request is queued. Its outcome comes as events and in its request record.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Accepted"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/WrongRole"
-        "503":
-          description: The request is not queued, because the client has stopped.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Accepted"
+                $ref: '#/components/schemas/Accepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /v1/interrogation/general:
     post:
       operationId: generalInterrogation
       summary: Request a general interrogation of the station (C_IC_NA_1, QOI 20).
       responses:
-        "202":
-          description: The request is queued. Its outcome comes as events.
+        '202':
+          description: The request is queued. Its outcome comes as events and in its request record.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Accepted"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/WrongRole"
-        "503":
-          description: The request is not queued, because the client has stopped.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Accepted"
+                $ref: '#/components/schemas/Accepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /v1/events:
     get:
       operationId: events
       summary: The events of the client after a sequence number, oldest first.
       parameters:
-        - name: after
-          in: query
-          required: false
-          description: Zero, or the last sequence number the reader has seen.
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
+      - name: after
+        in: query
+        required: false
+        description: Zero, or the last sequence number the reader has seen.
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
       responses:
-        "200":
+        '200':
           description: The events kept after the number.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EventsBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/WrongRole"
+                $ref: '#/components/schemas/EventsBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/WrongRole'
   /v1/points:
     get:
       operationId: listPoints
       summary: The points of the station, with their current values.
       responses:
-        "200":
+        '200':
           description: The points, by address.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PointList"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/WrongRole"
+                $ref: '#/components/schemas/PointList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/WrongRole'
   /v1/points/{address}:
     parameters:
-      - $ref: "#/components/parameters/Address"
+    - $ref: '#/components/parameters/Address'
     get:
       operationId: getPoint
       summary: One point of the station, with its current value.
       responses:
-        "200":
+        '200':
           description: The point.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Point"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NoPoint"
-        "409":
-          $ref: "#/components/responses/WrongRole"
+                $ref: '#/components/schemas/Point'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoPoint'
+        '409':
+          $ref: '#/components/responses/WrongRole'
     post:
       operationId: updatePoint
       summary: Set the value of a point. The station queues a spontaneous change when it differs.
@@ -138,32 +127,114 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PointUpdate"
+              $ref: '#/components/schemas/PointUpdate'
       responses:
-        "200":
+        '200':
           description: The value is stored.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PointUpdated"
-        "400":
+                $ref: '#/components/schemas/PointUpdated'
+        '400':
           description: The value does not fit the kind of the point.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NoPoint"
-        "409":
-          $ref: "#/components/responses/WrongRole"
-        "500":
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoPoint'
+        '409':
+          $ref: '#/components/responses/WrongRole'
+        '500':
           description: The value could not be published, or the clock is not available.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                $ref: '#/components/schemas/Error'
+  /v1/commands/single:
+    post:
+      operationId: singleCommand
+      summary: Send a single command to a point. A select is confirmed by its activation confirmation; an execution by its activation termination.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandRequest'
+      responses:
+        '202':
+          description: The command is queued. Its outcome comes as events and in its request record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Accepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/requests/{id}:
+    parameters:
+    - $ref: '#/components/parameters/RequestId'
+    get:
+      operationId: getRequest
+      summary: 'The record of a request: its stage, whether it was sent, and its outcome.'
+      responses:
+        '200':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoRequest'
+        '409':
+          $ref: '#/components/responses/WrongRole'
+  /v1/requests/{id}/cancel:
+    parameters:
+    - $ref: '#/components/parameters/RequestId'
+    post:
+      operationId: cancelRequest
+      summary: Cancel an open request. Its outcome is cancelled; if its I frame was already written, its record says so.
+      responses:
+        '200':
+          description: The request, cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoRequest'
+        '409':
+          description: The request already ended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/image/points:
+    get:
+      operationId: imagePoints
+      summary: The last value of each point the station sent, with its quality, time tag, cause, observation time, and connection generation.
+      responses:
+        '200':
+          description: The points of the image, by address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImagePointList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/WrongRole'
 components:
   securitySchemes:
     ControlToken:
@@ -180,6 +251,14 @@ components:
         type: integer
         minimum: 1
         maximum: 16777215
+    RequestId:
+      name: id
+      in: path
+      required: true
+      description: The identity of a request, as the request was accepted with.
+      schema:
+        type: integer
+        minimum: 1
   responses:
     Unauthorized:
       description: The control token is missing or wrong.
@@ -191,25 +270,51 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     WrongRole:
       description: The route belongs to the other role (a client route on a station, or the reverse).
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
     NoPoint:
       description: No point of the station has this address.
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: 'The request was refused: the transfer is not started, a request to the same address is open, or the route belongs to the other role.'
+      content:
+        application/json:
+          schema:
+            oneOf:
+            - $ref: '#/components/schemas/Error'
+            - $ref: '#/components/schemas/Refused'
+    Unavailable:
+      description: 'The request was not queued: too many requests are open, or the client has stopped.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Refused'
+    BadRequest:
+      description: The request is not valid, with the reason.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Refused'
+    NoRequest:
+      description: No request has this identity.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     Ready:
       description: The readiness of the runtime, by role.
       oneOf:
-        - $ref: "#/components/schemas/ClientReady"
-        - $ref: "#/components/schemas/StationReady"
+      - $ref: '#/components/schemas/ClientReady'
+      - $ref: '#/components/schemas/StationReady'
     ClientReady:
       type: object
       additionalProperties: false
@@ -222,12 +327,12 @@ components:
         control_address:
           type: string
         contract:
-          $ref: "#/components/schemas/ContractVersion"
+          $ref: '#/components/schemas/ContractVersion'
         connection:
           type: string
           enum: [down, up]
         transfer:
-          $ref: "events.schema.json#/$defs/TransferState"
+          $ref: events.schema.json#/$defs/TransferState
     StationReady:
       type: object
       additionalProperties: false
@@ -240,7 +345,7 @@ components:
         control_address:
           type: string
         contract:
-          $ref: "#/components/schemas/ContractVersion"
+          $ref: '#/components/schemas/ContractVersion'
         listen_address:
           type: string
         points:
@@ -249,16 +354,27 @@ components:
     ContractVersion:
       type: string
       description: The version of this contract, the same as the version of events.schema.json.
-      const: 1.0.0
+      const: 1.1.0
     Accepted:
       type: object
       additionalProperties: false
-      required: [accepted, error]
+      required:
+      - accepted
+      - request
+      - error
       properties:
         accepted:
           type: boolean
+        request:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+          description: The identity of the request, when it has one.
         error:
-          type: ["string", "null"]
+          type:
+          - string
+          - 'null'
     EventsBody:
       type: object
       additionalProperties: false
@@ -267,10 +383,10 @@ components:
         events:
           type: array
           items:
-            $ref: "events.schema.json#/$defs/Event"
+            $ref: events.schema.json#/$defs/Event
         first_seq:
           description: The oldest sequence number kept, or null when none is kept. A reader that asked after n has missed events when n + 1 is below this number.
-          type: ["integer", "null"]
+          type: [integer, 'null']
           minimum: 1
         last_seq:
           type: integer
@@ -292,16 +408,16 @@ components:
           minimum: 1
           maximum: 16777215
         kind:
-          $ref: "#/components/schemas/PointKind"
+          $ref: '#/components/schemas/PointKind'
         stamped:
           type: boolean
         value:
-          description: "The value in the form of the kind: a boolean (single), off, on, intermediate or indeterminate (double), or a number (normalized, scaled, float)."
+          description: 'The value in the form of the kind: a boolean (single), off, on, intermediate or indeterminate (double), or a number (normalized, scaled, float).'
           anyOf:
-            - type: boolean
-            - type: string
-              enum: [off, on, intermediate, indeterminate]
-            - type: number
+          - type: boolean
+          - type: string
+            enum: [off, on, intermediate, indeterminate]
+          - type: number
     PointList:
       type: object
       additionalProperties: false
@@ -310,7 +426,7 @@ components:
         points:
           type: array
           items:
-            $ref: "#/components/schemas/Point"
+            $ref: '#/components/schemas/Point'
     PointUpdate:
       type: object
       additionalProperties: false
@@ -339,3 +455,186 @@ components:
       properties:
         error:
           type: string
+    Refused:
+      type: object
+      additionalProperties: false
+      required:
+      - accepted
+      - request
+      - error
+      properties:
+        accepted:
+          const: false
+        request:
+          type: 'null'
+        error:
+          type: string
+    CommandRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - address
+      - on
+      properties:
+        address:
+          type: integer
+          minimum: 1
+          maximum: 16777215
+        on:
+          type: boolean
+          description: The state the command asks for.
+        select:
+          type: boolean
+          default: false
+          description: True to select; false to execute.
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 60000
+          default: 10000
+          description: How long the request may stay open, in milliseconds.
+    RequestView:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - type_id
+      - address
+      - stage
+      - sent
+      - generation
+      - outcome
+      - cause
+      - negative
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+          enum:
+          - interrogation
+          - single_command_select
+          - single_command_execute
+        type_id:
+          type: integer
+          minimum: 0
+          maximum: 255
+        address:
+          type: integer
+          minimum: 0
+          maximum: 16777215
+        stage:
+          type: string
+          enum:
+          - queued
+          - transmitted
+          - activated
+          - ended
+        sent:
+          type: boolean
+        generation:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+        outcome:
+          anyOf:
+          - type: string
+            enum:
+            - confirmed
+            - refused
+            - timed_out
+            - cancelled
+            - indeterminate
+            - not_sent
+          - type: 'null'
+        cause:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+          maximum: 63
+        negative:
+          type:
+          - boolean
+          - 'null'
+    ImagePoint:
+      type: object
+      additionalProperties: false
+      required:
+      - address
+      - type_id
+      - value
+      - quality
+      - time
+      - cause
+      - observed_at_ms
+      - generation
+      properties:
+        address:
+          type: integer
+          minimum: 0
+          maximum: 16777215
+        type_id:
+          type: integer
+          minimum: 0
+          maximum: 255
+        value:
+          description: 'The value in the form of its kind: a boolean, off/on/intermediate/indeterminate, or a number.'
+          anyOf:
+          - type: boolean
+          - type: string
+            enum:
+            - off
+            - on
+            - intermediate
+            - indeterminate
+          - type: number
+        quality:
+          type: object
+          additionalProperties: false
+          required:
+          - invalid
+          - not_topical
+          - substituted
+          - blocked
+          - overflow
+          properties:
+            invalid:
+              type: boolean
+            not_topical:
+              type: boolean
+            substituted:
+              type: boolean
+            blocked:
+              type: boolean
+            overflow:
+              type: boolean
+        time:
+          type:
+          - string
+          - 'null'
+          pattern: ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}$
+          description: The time tag, for a time-tagged type. The CP56Time2a year is read as 2000 plus it.
+        cause:
+          type: integer
+          minimum: 0
+          maximum: 63
+        observed_at_ms:
+          type: integer
+          minimum: 0
+        generation:
+          type: integer
+          minimum: 0
+    ImagePointList:
+      type: object
+      additionalProperties: false
+      required:
+      - points
+      properties:
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImagePoint'

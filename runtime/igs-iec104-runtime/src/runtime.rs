@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use igs_iec104::server::{Server, ServerHandle};
 use igs_iec104::Client;
+use igs_iec104_codec::header::CommonAddress;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
@@ -65,6 +66,7 @@ enum Engine {
         client: Client,
         requests: mpsc::Receiver<Request>,
         recorder: Arc<Recorder>,
+        common_address: CommonAddress,
     },
     Server {
         server: Server<Refuse>,
@@ -127,6 +129,7 @@ impl Runtime {
                     client,
                     requests,
                     recorder,
+                    common_address: CommonAddress::new(config.common_address),
                 };
                 (engine, Some(link), None)
             }
@@ -184,11 +187,13 @@ impl Runtime {
                 client,
                 requests,
                 recorder,
+                common_address,
             } => {
                 // The owner holds only the recorder, not the request sender: it ends when the
                 // control API ends, because the last sender is then dropped. It is aborted
                 // after the control API, so that it cannot outlive the runtime.
-                let owner = tokio::spawn(client_role::run(client, requests, recorder));
+                let owner =
+                    tokio::spawn(client_role::run(client, requests, recorder, common_address));
                 let served = axum::serve(control, crate::api::router(shared))
                     .with_graceful_shutdown(shutdown)
                     .await;

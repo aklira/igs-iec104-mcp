@@ -32,7 +32,7 @@ def test_every_event_kind_is_in_the_schema(contract: Any) -> None:
         choice["$ref"].rsplit("/", 1)[-1]
         for choice in contract.events["$defs"]["Event"]["oneOf"]
     }
-    assert len(kinds) == 10
+    assert len(kinds) == 11
     assert {"Asdu", "Closed", "Transfer"} <= kinds
 
 

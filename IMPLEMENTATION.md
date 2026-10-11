@@ -568,7 +568,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | S2 Runtime, server role | [x] |
 | S3 Minimal Python control path | [x] |
 | C1 Runtime API and event contract | [x] |
-| C2 Client correlation, generations, point image | [ ] |
+| C2 Client correlation, generations, point image | [x] |
 | C3 Server points, simulation, command policy | [ ] |
 | C4 Definition models and YAML schemas | [ ] |
 | C5 Definition storage | [ ] |

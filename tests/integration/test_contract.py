@@ -194,3 +194,42 @@ async def check_client(contract: Any, c: httpx.AsyncClient) -> None:
     status, body, _ = await call(c, "POST", "/v1/points/1", {"value": True})
     check(contract, "/v1/points/{address}", "post", status, body)
     assert status == 409, "a client serves no points"
+
+    status, body, _ = await call(
+        c, "POST", "/v1/commands/single", {"address": 0, "on": True, "select": True}
+    )
+    check(contract, "/v1/commands/single", "post", status, body)
+    assert status == 400, "address 0 is not a point"
+
+    status, body, _ = await call(
+        c, "POST", "/v1/commands/single", {"address": 1, "on": True, "select": True}
+    )
+    check(contract, "/v1/commands/single", "post", status, body)
+    assert status == 202
+    request = body["request"]
+
+    async def ended() -> bool:
+        _, view, _ = await call(c, "GET", f"/v1/requests/{request}")
+        return view["outcome"] is not None
+
+    await wait_for("the command to end", ended)
+    status, view, _ = await call(c, "GET", f"/v1/requests/{request}")
+    check(contract, "/v1/requests/{id}", "get", status, view)
+    # The milestone station refuses every command: cause 47, as a negative confirmation.
+    assert (
+        view["outcome"] == "refused"
+        and view["cause"] == 47
+        and view["negative"] is True
+    )
+
+    status, body, _ = await call(c, "POST", f"/v1/requests/{request}/cancel")
+    check(contract, "/v1/requests/{id}/cancel", "post", status, body)
+    assert status == 409, "a request that ended cannot be cancelled"
+
+    status, body, _ = await call(c, "GET", "/v1/requests/999999")
+    check(contract, "/v1/requests/{id}", "get", status, body)
+    assert status == 404
+
+    status, body, _ = await call(c, "GET", "/v1/image/points")
+    check(contract, "/v1/image/points", "get", status, body)
+    assert any(point["address"] == 1 for point in body["points"])

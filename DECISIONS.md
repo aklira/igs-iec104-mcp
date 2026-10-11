@@ -130,3 +130,27 @@ test can show it.
 - Reason: the decoded form depends on the point image (values, quality, time tags, and the point
   types of the station), which C2 builds. Describing it now would fix a shape before the code that
   produces it exists.
+
+## D-011: Client requests, verdicts, and the point image (contract 1.1.0)
+
+- Date: 2026-10-11 (task C2).
+- Decision: the client correlates its requests with the station's answers. A request (an
+  interrogation, or a single command) has a stage (`queued`, `transmitted`, `activated`, `ended`), and
+  an outcome when it ends: `confirmed`, `refused` (with the cause and the P/N bit), `timed_out`,
+  `cancelled`, `indeterminate`, or `not_sent`. A select is confirmed by its activation confirmation; an
+  execution, and an interrogation, by their activation termination. An answer is judged only against a
+  request written in the current connection generation. A request whose connection ended after it was
+  written is `indeterminate`, and is never sent again. A command is refused unless the data transfer is
+  started. Two open requests cannot share a type identification and an address, and at most eight are
+  open at a time, below the client's channel capacity of 32, so the owner never waits for room in the
+  command channel.
+- Contract 1.1.0 (additive): every event carries its `generation`; a `verdict` event reports an outcome;
+  new routes are `POST /v1/commands/single`, `GET` and `POST .../cancel` for a request record, and
+  `GET /v1/image/points`. The interrogation and command answers carry the identity of the request.
+- Point image: the last value of each point the station sent, with its quality, time tag (read as
+  2000 plus the two-digit CP56 year), cause, observation time, and generation. It covers the single,
+  double, and measured types, plain and time-tagged, as the profile defines them.
+- Test: `runtime/igs-iec104-runtime/src/correlation.rs` (rules, with an injected clock),
+  `src/image.rs` (decoding), and `tests/client_correlation.rs` (against the upstream station and a silent
+  peer). `not_sent` is reached end to end only through a race the test cannot force; its rule is tested
+  in `correlation`.

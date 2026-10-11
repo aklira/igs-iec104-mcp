@@ -59,6 +59,22 @@ pub enum EventKind {
     },
     /// The client stopped.
     Closed,
+    /// A request ended. `sent` tells whether its I frame was written, and `transmitted_generation`
+    /// the connection it was written on.
+    Verdict {
+        /// The request.
+        request: u64,
+        /// `confirmed`, `refused`, `timed_out`, `cancelled`, `indeterminate`, or `not_sent`.
+        outcome: &'static str,
+        /// Whether the I frame was written.
+        sent: bool,
+        /// For a refusal: the cause of the station's answer.
+        cause: Option<u8>,
+        /// For a refusal: true for a negative confirmation.
+        negative: Option<bool>,
+        /// The connection generation the request was written on, if it was.
+        transmitted_generation: Option<u64>,
+    },
 }
 
 /// An ASDU as the control API reports it: its header, and its encoding in hexadecimal. The
@@ -101,6 +117,8 @@ pub struct Recorded {
     pub seq: u64,
     /// The time the event was recorded, in milliseconds since the Unix epoch (UTC).
     pub observed_at_ms: u64,
+    /// The connection generation the event was recorded in: the number of connections so far.
+    pub generation: u64,
     /// The event.
     #[serde(flatten)]
     pub kind: EventKind,
@@ -126,13 +144,14 @@ impl EventLog {
         }
     }
 
-    /// Records an event at the current time and returns its sequence number.
-    pub fn record(&mut self, kind: EventKind) -> u64 {
-        self.record_at(kind, now_ms())
+    /// Records an event at the current time, in `generation`, and returns its sequence number.
+    pub fn record(&mut self, kind: EventKind, generation: u64) -> u64 {
+        self.record_at(kind, now_ms(), generation)
     }
 
-    /// Records an event observed at `observed_at_ms` and returns its sequence number.
-    pub fn record_at(&mut self, kind: EventKind, observed_at_ms: u64) -> u64 {
+    /// Records an event observed at `observed_at_ms`, in `generation`, and returns its sequence
+    /// number.
+    pub fn record_at(&mut self, kind: EventKind, observed_at_ms: u64, generation: u64) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
         if self.capacity == 0 {
@@ -146,6 +165,7 @@ impl EventLog {
         self.events.push_back(Recorded {
             seq,
             observed_at_ms,
+            generation,
             kind,
         });
         seq
@@ -176,7 +196,8 @@ impl EventLog {
     }
 }
 
-fn now_ms() -> u64 {
+/// The current time in milliseconds since the Unix epoch.
+pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| {
@@ -195,8 +216,8 @@ mod tests {
     #[test]
     fn sequence_numbers_start_at_one_and_grow() {
         let mut log = EventLog::new(8);
-        assert_eq!(log.record_at(connected(), 1), 1);
-        assert_eq!(log.record_at(connected(), 2), 2);
+        assert_eq!(log.record_at(connected(), 1, 1), 1);
+        assert_eq!(log.record_at(connected(), 2, 1), 2);
         assert_eq!(log.last_seq(), 2);
         assert_eq!(log.first_seq(), Some(1));
     }
@@ -205,7 +226,7 @@ mod tests {
     fn the_oldest_events_are_dropped_and_counted_when_full() {
         let mut log = EventLog::new(2);
         for at in 1..=5 {
-            log.record_at(connected(), at);
+            log.record_at(connected(), at, 1);
         }
         assert_eq!(log.dropped(), 3);
         assert_eq!(log.first_seq(), Some(4));
@@ -217,7 +238,7 @@ mod tests {
     fn a_reader_sees_only_the_events_after_its_number() {
         let mut log = EventLog::new(8);
         for at in 1..=3 {
-            log.record_at(connected(), at);
+            log.record_at(connected(), at, 1);
         }
         let seqs: Vec<u64> = log.after(2).iter().map(|event| event.seq).collect();
         assert_eq!(seqs, vec![3]);
@@ -227,8 +248,8 @@ mod tests {
     #[test]
     fn a_zero_capacity_log_keeps_nothing_and_counts_every_event() {
         let mut log = EventLog::new(0);
-        log.record_at(connected(), 1);
-        log.record_at(connected(), 2);
+        log.record_at(connected(), 1, 1);
+        log.record_at(connected(), 2, 1);
         assert!(log.after(0).is_empty());
         assert_eq!(log.first_seq(), None);
         assert_eq!(log.dropped(), 2);

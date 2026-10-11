@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use crate::correlation::RequestId;
 use axum::extract::{Path, Query, State};
 use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::StatusCode;
@@ -20,11 +21,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
-use crate::client_role::{Request as ClientRequest, Status};
+use crate::client_role::{self, Refusal, Request as ClientRequest, Status};
+use crate::correlation::{CancelError, Outcome, View};
 use crate::events::Recorded;
+use crate::image::Point;
 use crate::lock;
 use crate::points::{self, PointSpec};
 use crate::runtime::{ClientLink, ServerLink, Shared};
+use igs_iec104_codec::formats::Cp56Time2a;
+use std::time::Duration;
 
 /// The routes of the control API.
 pub fn router(shared: Arc<Shared>) -> Router {
@@ -32,6 +37,10 @@ pub fn router(shared: Arc<Shared>) -> Router {
         .route("/v1/ready", get(ready))
         .route("/v1/transfer/start", post(start_transfer))
         .route("/v1/interrogation/general", post(general_interrogation))
+        .route("/v1/commands/single", post(single_command))
+        .route("/v1/requests/{id}", get(get_request))
+        .route("/v1/requests/{id}/cancel", post(cancel_request))
+        .route("/v1/image/points", get(image_points))
         .route("/v1/events", get(events))
         .route("/v1/points", get(list_points))
         .route("/v1/points/{address}", get(get_point).post(update_point))
@@ -85,9 +94,21 @@ async fn ready(State(shared): State<Arc<Shared>>) -> Json<Value> {
     Json(body)
 }
 
-/// The answer to a client request that cannot be queued, or that was queued.
-fn accepted(status: StatusCode, accepted: bool, error: Option<String>) -> Response {
-    (status, Json(json!({"accepted": accepted, "error": error}))).into_response()
+/// The answer to a client request: accepted with the identity of the request (when it has one), or
+/// refused with the reason.
+fn accepted(status: StatusCode, request: Option<RequestId>, error: Option<String>) -> Response {
+    let body = json!({"accepted": error.is_none(), "request": request, "error": error});
+    (status, Json(body)).into_response()
+}
+
+/// The answer to a request that was refused, by the status its reason implies.
+fn refused(refusal: Refusal) -> Response {
+    let status = match refusal {
+        Refusal::NotStarted | Refusal::Busy(_) => StatusCode::CONFLICT,
+        Refusal::TooManyOpen | Refusal::Stopped => StatusCode::SERVICE_UNAVAILABLE,
+        Refusal::Invalid(_) => StatusCode::BAD_REQUEST,
+    };
+    accepted(status, None, Some(refusal.to_string()))
 }
 
 /// The answer to a route of the other role.
@@ -96,38 +117,189 @@ fn wrong_role(role: &str) -> Response {
     (StatusCode::CONFLICT, Json(json!({"error": error}))).into_response()
 }
 
+/// Asks the client, and waits for its answer to the request.
+async fn ask<T>(
+    client: &ClientLink,
+    request: impl FnOnce(oneshot::Sender<Result<T, Refusal>>) -> ClientRequest,
+) -> Result<T, Refusal> {
+    let (reply, answer) = oneshot::channel();
+    if client.requests.send(request(reply)).await.is_err() {
+        return Err(Refusal::Stopped);
+    }
+    answer.await.unwrap_or(Err(Refusal::Stopped))
+}
+
 async fn start_transfer(State(shared): State<Arc<Shared>>) -> Response {
-    match &shared.client {
-        Some(client) => submit(client, ClientRequest::StartTransfer).await,
-        None => wrong_role("client"),
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    match ask(client, ClientRequest::StartTransfer).await {
+        Ok(()) => accepted(StatusCode::ACCEPTED, None, None),
+        Err(refusal) => refused(refusal),
     }
 }
 
 async fn general_interrogation(State(shared): State<Arc<Shared>>) -> Response {
-    match &shared.client {
-        Some(client) => submit(client, ClientRequest::GeneralInterrogation).await,
-        None => wrong_role("client"),
-    }
-}
-
-async fn submit(
-    client: &ClientLink,
-    request: fn(oneshot::Sender<Result<(), String>>) -> ClientRequest,
-) -> Response {
-    let (reply, answer) = oneshot::channel();
-    let outcome = match client.requests.send(request(reply)).await {
-        Ok(()) => answer
-            .await
-            .unwrap_or_else(|_| Err(CLIENT_STOPPED.to_owned())),
-        Err(_) => Err(CLIENT_STOPPED.to_owned()),
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
     };
-    match outcome {
-        Ok(()) => accepted(StatusCode::ACCEPTED, true, None),
-        Err(error) => accepted(StatusCode::SERVICE_UNAVAILABLE, false, Some(error)),
+    match ask(client, ClientRequest::Interrogate).await {
+        Ok(id) => accepted(StatusCode::ACCEPTED, Some(id), None),
+        Err(refusal) => refused(refusal),
     }
 }
 
-const CLIENT_STOPPED: &str = "the client has stopped";
+/// The body of a single command: the address, the state, select or execute, and how long the request
+/// may stay open.
+#[derive(Deserialize)]
+struct CommandBody {
+    address: u32,
+    on: bool,
+    #[serde(default)]
+    select: bool,
+    #[serde(default = "default_timeout_ms")]
+    timeout_ms: u64,
+}
+
+fn default_timeout_ms() -> u64 {
+    10_000
+}
+
+/// The longest a request may stay open, in milliseconds.
+const MAX_TIMEOUT_MS: u64 = 60_000;
+
+async fn single_command(
+    State(shared): State<Arc<Shared>>,
+    Json(body): Json<CommandBody>,
+) -> Response {
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    let address = match points::address(body.address) {
+        Ok(address) => address,
+        Err(error) => return refused(Refusal::Invalid(error.to_string())),
+    };
+    if !(1..=MAX_TIMEOUT_MS).contains(&body.timeout_ms) {
+        let reason = format!("timeout_ms must be from 1 to {MAX_TIMEOUT_MS}");
+        return refused(Refusal::Invalid(reason));
+    }
+    let timeout = Duration::from_millis(body.timeout_ms);
+    let (on, select) = (body.on, body.select);
+    match ask(client, |reply| ClientRequest::SingleCommand {
+        address,
+        on,
+        select,
+        timeout,
+        reply,
+    })
+    .await
+    {
+        Ok(id) => accepted(StatusCode::ACCEPTED, Some(id), None),
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// A request as the control API reports it.
+fn request_view(view: &View) -> Value {
+    let (cause, negative) = match view.outcome {
+        Some(Outcome::Refused { cause, negative }) => (Some(cause), Some(negative)),
+        _ => (None, None),
+    };
+    json!({
+        "id": view.id,
+        "kind": view.kind.name(),
+        "type_id": view.type_id as u8,
+        "address": view.address.value(),
+        "stage": view.stage,
+        "sent": view.sent,
+        "generation": view.generation,
+        "outcome": view.outcome.map(Outcome::name),
+        "cause": cause,
+        "negative": negative,
+    })
+}
+
+async fn get_request(State(shared): State<Arc<Shared>>, Path(id): Path<u64>) -> Response {
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    match lock(&client.recorder.correlation).view(id) {
+        Some(view) => Json(request_view(&view)).into_response(),
+        None => no_request(id),
+    }
+}
+
+async fn cancel_request(State(shared): State<Arc<Shared>>, Path(id): Path<u64>) -> Response {
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    let outcome = lock(&client.recorder.correlation).cancel(id);
+    match outcome {
+        Ok(finished) => client_role::finish(&client.recorder, &[finished]),
+        Err(CancelError::Unknown) => return no_request(id),
+        Err(CancelError::Ended(ended)) => {
+            let error = format!("the request already ended: {}", ended.name());
+            return (StatusCode::CONFLICT, Json(json!({"error": error}))).into_response();
+        }
+    }
+    match lock(&client.recorder.correlation).view(id) {
+        Some(view) => Json(request_view(&view)).into_response(),
+        None => no_request(id),
+    }
+}
+
+fn no_request(id: RequestId) -> Response {
+    let body = json!({"error": format!("no request with identity {id}")});
+    (StatusCode::NOT_FOUND, Json(body)).into_response()
+}
+
+/// A time tag as text: `20yy-mm-ddThh:mm:ss.mmm`, with the two-digit year of CP56Time2a read as
+/// 2000 plus that year.
+fn time_text(time: Cp56Time2a) -> String {
+    let milliseconds = u32::from(time.milliseconds());
+    format!(
+        "20{:02}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+        time.year(),
+        time.month(),
+        time.day_of_month(),
+        time.hours(),
+        time.minutes(),
+        milliseconds / 1000,
+        milliseconds % 1000,
+    )
+}
+
+/// A point of the client's image as the control API reports it.
+fn image_view(address: u32, point: &Point) -> Value {
+    json!({
+        "address": address,
+        "type_id": point.type_id as u8,
+        "value": points::json_of(point.value),
+        "quality": {
+            "invalid": point.quality.invalid,
+            "not_topical": point.quality.not_topical,
+            "substituted": point.quality.substituted,
+            "blocked": point.quality.blocked,
+            "overflow": point.quality.overflow,
+        },
+        "time": point.time.map(time_text),
+        "cause": point.cause,
+        "observed_at_ms": point.observed_at_ms,
+        "generation": point.generation,
+    })
+}
+
+async fn image_points(State(shared): State<Arc<Shared>>) -> Response {
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    let image = lock(&client.recorder.image);
+    let points: Vec<Value> = image
+        .iter()
+        .map(|(address, point)| image_view(address, point))
+        .collect();
+    Json(json!({"points": points})).into_response()
+}
 
 /// The query of the events: those after `after`. Zero asks for all the events kept.
 #[derive(Deserialize)]

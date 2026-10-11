@@ -9,7 +9,9 @@
 pub mod api;
 pub mod client_role;
 pub mod config;
+pub mod correlation;
 pub mod events;
+pub mod image;
 pub mod points;
 pub mod runtime;
 pub mod server_role;
@@ -24,7 +26,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The version of the control API and event contract (`contracts/`). It changes with an incompatible
 /// change of either file.
-pub const CONTRACT_VERSION: &str = "1.0.0";
+pub const CONTRACT_VERSION: &str = "1.1.0";
 
 /// The identity line of the runtime: its name, version, and the protocol port of the library.
 pub fn banner() -> String {

@@ -49,6 +49,14 @@ fn samples() -> Vec<EventKind> {
             asdus: vec![view()],
         },
         EventKind::Closed,
+        EventKind::Verdict {
+            request: 7,
+            outcome: "refused",
+            sent: true,
+            cause: Some(47),
+            negative: Some(false),
+            transmitted_generation: Some(2),
+        },
     ]
 }
 
@@ -65,6 +73,7 @@ fn definition_of(kind: &str) -> Option<&'static str> {
         "rejected" => "Rejected",
         "unacknowledged" => "Unacknowledged",
         "closed" => "Closed",
+        "verdict" => "Verdict",
         _ => return None,
     })
 }
@@ -177,7 +186,7 @@ fn every_kind_the_client_records_matches_the_events_schema() {
     let schema = schema();
     for kind in samples() {
         let mut log = EventLog::new(4);
-        log.record_at(kind.clone(), 1_700_000_000_000);
+        log.record_at(kind.clone(), 1_700_000_000_000, 3);
         let recorded = log.after(0).pop().expect("the event is kept");
         let event = serde_json::to_value(&recorded).expect("the event is JSON");
         let name = event["kind"].as_str().expect("the event has a kind");
@@ -206,7 +215,7 @@ fn the_schema_describes_every_kind_the_client_can_record() {
         .iter()
         .map(|kind| {
             let mut log = EventLog::new(1);
-            log.record_at(kind.clone(), 0);
+            log.record_at(kind.clone(), 0, 1);
             let event = serde_json::to_value(log.after(0).pop().expect("kept")).expect("JSON");
             definition_of(event["kind"].as_str().unwrap_or_default()).unwrap_or_default()
         })
@@ -224,11 +233,11 @@ fn the_checker_refuses_an_event_outside_the_contract() {
     let fragment = &schema["$defs"]["Asdu"];
     let outside = [
         // A type identification beyond one octet.
-        json!({"seq": 1, "observed_at_ms": 0, "kind": "asdu", "asdu": {"type_id": 300, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}}),
+        json!({"seq": 1, "observed_at_ms": 0, "generation": 1, "kind": "asdu", "asdu": {"type_id": 300, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}}),
         // A field the contract does not have.
-        json!({"seq": 1, "observed_at_ms": 0, "kind": "asdu", "asdu": {"type_id": 1, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}, "extra": true}),
+        json!({"seq": 1, "observed_at_ms": 0, "generation": 1, "kind": "asdu", "asdu": {"type_id": 1, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}, "extra": true}),
         // A sequence number of zero: the first event is number 1.
-        json!({"seq": 0, "observed_at_ms": 0, "kind": "asdu", "asdu": {"type_id": 1, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}}),
+        json!({"seq": 0, "observed_at_ms": 0, "generation": 1, "kind": "asdu", "asdu": {"type_id": 1, "cause": 20, "negative": false, "common_address": 1, "bytes_hex": null}}),
     ];
     for event in outside {
         assert!(
