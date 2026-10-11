@@ -1,5 +1,5 @@
-# Runs the Python part of the standard gate of IMPLEMENTATION.md §2 on Linux.
-# The Rust part of the gate and the Docker tests are added with tasks B2 and D1.
+# Runs the standard gate of IMPLEMENTATION.md §2 on Linux, the Rust runtime's gate, and the runtime
+# image build. The Docker integration tests are added with task D1.
 
 name: CI
 
@@ -41,3 +41,60 @@ jobs:
 
       - name: Unit tests
         run: uv run pytest tests/unit
+
+      - name: Licence policy
+        run: uv run python scripts/check_licences.py
+
+  rust-gate:
+    name: Rust gate (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the OpenSSL development files
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Deny
+        run: cargo deny check
+
+  image:
+    name: Runtime image (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build --file docker/runtime.Dockerfile --tag igs-iec104-runtime:ci runtime
+
+      - name: Start the runtime, which prints its banner and exits
+        run: |
+          docker run --rm igs-iec104-runtime:ci | tee banner.txt
+          grep -q '^igs-iec104-runtime ' banner.txt
+
+      - name: Record the image ID
+        run: docker image inspect --format '{{.Id}}' igs-iec104-runtime:ci | tee image-id.txt
+
+      - name: Publish the image ID
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-image-id
+          path: image-id.txt

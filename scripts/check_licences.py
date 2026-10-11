@@ -11,7 +11,11 @@ import importlib.metadata as metadata
 import sys
 
 # The licences the policy of §2 allows, matched exactly or by prefix.
-ALLOWED_EXACT = frozenset({"MIT", "Apache-2.0", "ISC", "BSD"})
+# MPL-2.0, PSF-2.0 and MIT-0 are admitted by decision D-007: transitive and development
+# dependencies used unmodified.
+ALLOWED_EXACT = frozenset(
+    {"MIT", "Apache-2.0", "ISC", "BSD", "MPL-2.0", "PSF-2.0", "MIT-0"}
+)
 ALLOWED_PREFIX = ("BSD-",)
 
 # Trove classifiers, used only when a distribution states no licence expression.

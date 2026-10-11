@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["igs-iec104-runtime"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# The oldest toolchain the code is written for. rust-toolchain.toml pins the one that builds it.
+rust-version = "1.85"
+license = "Apache-2.0"
+publish = false

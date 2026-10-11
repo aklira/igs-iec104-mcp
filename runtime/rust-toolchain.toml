@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned for reproducible builds (decision D-005). It is above the minimum of 1.85 in Cargo.toml.
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

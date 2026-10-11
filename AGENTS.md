@@ -24,8 +24,9 @@ Python MCP server that orchestrates IEC 60870-5-104 test benches built on the Ru
   field sizes and bit positions are data and may be used.
 - Never open, quote, reconstruct or describe the source of other IEC 104 implementations. They are
   used as black boxes only: a separate process or container, driven over the network.
-- Dependencies must be MIT, Apache-2.0, BSD or ISC. Ask before adding a dependency that §11 does
-  not list.
+- Dependencies must be MIT, Apache-2.0, BSD or ISC. Decision D-007 also admits MPL-2.0, PSF-2.0
+  and MIT-0 for transitive and development dependencies used unmodified. Ask before adding a
+  dependency that §11 does not list.
 - Secrets (control credentials, private keys, passwords) are never committed, logged or written
   into reports.
 
@@ -38,8 +39,14 @@ uv run mypy
 uv run pytest tests/unit
 ```
 
-Run `uv sync --locked` first. The Rust part of the gate (`cargo fmt`, `cargo clippy`,
-`cargo test`, `cargo deny`) is added with task B2.
+Run `uv sync --locked` first. The Rust runtime has its own gate, in `runtime/`:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo deny check
+```
 
 ## Layout
 

@@ -31,7 +31,7 @@ These rules apply to every task of §14. Read this file before any task; read on
 
 - Never copy IEC standard text into code, comments, docs, tests, YAML examples, or commit messages. Cite clauses (`IEC 60870-5-104 §7.5`) and paraphrase. Type identifications, causes, field sizes, and bit positions are data and may be used.
 - Never open, quote, reconstruct, or describe the source of other IEC 104 implementations (lib60870 in C or .NET, the crates `iec60870-5` and `lib60870`, or any other). Independent implementations are used as black boxes only: a separate process or container, driven over the network.
-- Dependencies must be MIT, Apache-2.0, BSD, or ISC (the Python and Rust checks of §11 enforce it). Ask before adding a dependency that §11 does not list.
+- Dependencies must be MIT, Apache-2.0, BSD, or ISC (the Python and Rust checks of §11 enforce it). Decision D-007 also admits MPL-2.0, PSF-2.0, and MIT-0, but only for transitive and development dependencies used unmodified; a direct dependency under those licences needs approval. Ask before adding a dependency that §11 does not list.
 - Secrets (control credentials, private keys, passwords) are never committed, logged, or written into reports.
 
 ### Standard gate
@@ -559,7 +559,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | Task | Done |
 | --- | --- |
 | B1 Python project and tooling | [x] |
-| B2 Rust runtime skeleton and image | [ ] |
+| B2 Rust runtime skeleton and image | [x] |
 | U1 Graceful server shutdown (upstream) ⛔ | [x] |
 | U2 Server connection events (upstream) ⛔ | [x] |
 | U3 Client command policy on disconnect (upstream) ⛔ | [x] |

@@ -1,0 +1,17 @@
+[package]
+name = "igs-iec104-runtime"
+description = "IEC 60870-5-104 runtime of the test bench orchestrator, built on igs-iec104"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Pinned by revision (IMPLEMENTATION.md §4, decision D-004). Cargo resolves the other crates of
+# that repository from the same revision.
+igs-iec104 = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc824fcbc750262a5c8505c8812457d200c1" }
+
+[[bin]]
+name = "igs-iec104-runtime"
+path = "src/main.rs"

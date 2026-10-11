@@ -1,0 +1,30 @@
+# Licence and source policy of the runtime (IMPLEMENTATION.md §2 and §11).
+# Only permissive licences are accepted; the same list as the upstream library, minus the fuzzing
+# licence, which the runtime does not use.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The one git source: the upstream library, pinned by revision in Cargo.toml (D-004).
+allow-git = ["https://github.com/aklira/igs-iec104"]
