@@ -534,6 +534,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: M2, X1.
 - Produce: the policy of §9 (allowed operations, elicitation, recorded confirmation).
 - Done when: tests show a state-changing operation refused when not allowed, refused without confirmation, and recorded when confirmed.
+- Done (D-038): a command to an external target is confirmed by a person through elicitation, or by a reviewed opt-in when the client cannot be asked, and each decision is journaled. External connections are still refused by the planner, so a confirmed command is unsupported.
 
 **M4 — Streamable HTTP transport** ⛔
 - Depends: M2.
@@ -617,7 +618,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E5 Restart and reconnect primitives | [x] |
 | M1 MCP server over stdio | [x] |
 | M2 Scenario and run tools | [x] |
-| M3 Confirmation on external targets | [ ] |
+| M3 Confirmation on external targets | [x] |
 | M4 Streamable HTTP transport ⛔ | [ ] |
 | X1 External target model and policy | [x] |
 | X2 Published server endpoints | [x] |

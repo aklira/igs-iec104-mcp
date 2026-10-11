@@ -44,6 +44,7 @@ from igs_iec104_mcp.models.scenario import Scenario, check_scenario
 from igs_iec104_mcp.runtime.source import ControlSource
 from igs_iec104_mcp.scenarios.actions import actions_for
 from igs_iec104_mcp.scenarios.assertions import ASSERTION_HANDLERS
+from igs_iec104_mcp.scenarios.confirmation import Confirmer, Gate
 from igs_iec104_mcp.scenarios.engine import Result, execute
 from igs_iec104_mcp.storage.runs import (
     RUNS_DIRECTORY,
@@ -310,9 +311,12 @@ class Runner:
         self._engine = engine
         self._running: dict[str, _Running] = {}
 
-    async def start(self, scenario_name: str) -> RunRecord:
+    async def start(
+        self, scenario_name: str, *, confirmer: Confirmer | None = None
+    ) -> RunRecord:
         """Starts a run of a scenario. The run is returned at once, running: the bench
-        starts, and the scenario runs, in a task."""
+        starts, and the scenario runs, in a task. A state-changing step to an external
+        target asks `confirmer` (see scenarios.confirmation)."""
         scenario, bench = self._definitions(scenario_name)
         _refuse_unsupported(bench)
         try:
@@ -325,7 +329,9 @@ class Runner:
             self._store.snapshot_run(run_id, bench.name, scenario.name)
             self._runs.move(run_id, RunStatus.RUNNING)
         cancel = asyncio.Event()
-        task = asyncio.create_task(self._execute(run_id, bench, scenario, cancel))
+        task = asyncio.create_task(
+            self._execute(run_id, bench, scenario, cancel, confirmer)
+        )
         self._running[run_id] = _Running(task=task, cancel=cancel)
         task.add_done_callback(lambda _: self._running.pop(run_id, None))
         return self.get(run_id)
@@ -444,20 +450,30 @@ class Runner:
         return scenario, bench
 
     async def _execute(
-        self, run_id: str, bench: TestBench, scenario: Scenario, cancel: asyncio.Event
+        self,
+        run_id: str,
+        bench: TestBench,
+        scenario: Scenario,
+        cancel: asyncio.Event,
+        confirmer: Confirmer | None,
     ) -> None:
         timer = asyncio.get_running_loop().call_later(
             _limit(bench), self._limit_reached, run_id, cancel
         )
         try:
-            status, reason = await self._run(run_id, bench, scenario, cancel)
+            status, reason = await self._run(run_id, bench, scenario, cancel, confirmer)
         finally:
             timer.cancel()
         self._runs.record(run_id, "ended", {"status": str(status), "reason": reason})
         self._runs.move(run_id, status, ended_at_ms=_now_ms())
 
     async def _run(
-        self, run_id: str, bench: TestBench, scenario: Scenario, cancel: asyncio.Event
+        self,
+        run_id: str,
+        bench: TestBench,
+        scenario: Scenario,
+        cancel: asyncio.Event,
+        confirmer: Confirmer | None,
     ) -> tuple[RunStatus, str]:
         evidence = self._runs.root / RUNS_DIRECTORY / run_id / EVIDENCE
         try:
@@ -470,7 +486,9 @@ class Runner:
         managed = _ManagedBench(handle, bench)
         status, reason = RunStatus.ERROR, "the run failed"
         try:
-            result = await self._scenario(run_id, bench, managed, scenario, cancel)
+            result = await self._scenario(
+                run_id, bench, managed, scenario, cancel, confirmer
+            )
             status, reason = result.status, result.reason
         except Exception as error:
             self._runs.record(
@@ -492,10 +510,20 @@ class Runner:
         managed: _ManagedBench,
         scenario: Scenario,
         cancel: asyncio.Event,
+        confirmer: Confirmer | None,
     ) -> Result:
         clients = [i.name for i in bench.instances if i.role == "client"]
         source = ControlSource({name: managed.control(name) for name in clients})
-        handlers = {**ASSERTION_HANDLERS, **actions_for(managed)}
+
+        def record_confirmation(fields: dict[str, Any]) -> None:
+            self._runs.record(run_id, "confirmation", fields)
+
+        gate = Gate(bench, confirmer, record_confirmation)
+        handlers = {
+            **ASSERTION_HANDLERS,
+            **actions_for(managed),
+            "send_command": gate.send_command,
+        }
 
         def observe(verdict: Verdict) -> None:
             self._runs.record(

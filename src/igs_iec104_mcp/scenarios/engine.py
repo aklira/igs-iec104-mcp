@@ -103,6 +103,10 @@ class StepFailed(Exception):
     """A check of a step did not hold: its verdict is FAILED."""
 
 
+class StepUnsupported(Exception):
+    """A step asks for something the run does not carry out: UNSUPPORTED."""
+
+
 class Context:
     """What a handler may use: the cursor of its instance, a wait for a matching event
     after it, and the point image.
@@ -321,6 +325,8 @@ async def _run_step(
         return Outcome.CANCELLED, "cancelled during this step"
     except StepFailed as error:
         return Outcome.FAILED, str(error)
+    except StepUnsupported as error:
+        return Outcome.UNSUPPORTED, str(error)
     except TimeoutError:
         detail = _no_result(limit)
         if context.note is not None:

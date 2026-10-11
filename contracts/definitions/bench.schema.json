@@ -107,6 +107,18 @@
           "title": "Network",
           "type": "string"
         },
+        "opt_in": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OptIn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The reviewed opt-in, for a client that cannot confirm."
+        },
         "role": {
           "enum": [
             "client",
@@ -290,6 +302,41 @@
       ],
       "title": "Operation",
       "type": "string"
+    },
+    "OptIn": {
+      "additionalProperties": false,
+      "description": "A reviewed opt-in: the state-changing operations the target may receive without a\n    human confirmation at run time (\u00a79).",
+      "properties": {
+        "operations": {
+          "description": "The state-changing operations the opt-in covers.",
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        },
+        "reviewed_on": {
+          "description": "The date of the review, as YYYY-MM-DD.",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Reviewed On",
+          "type": "string"
+        },
+        "reviewer": {
+          "description": "Who reviewed the opt-in.",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Reviewer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reviewer",
+        "reviewed_on",
+        "operations"
+      ],
+      "title": "OptIn",
+      "type": "object"
     },
     "Point": {
       "additionalProperties": false,

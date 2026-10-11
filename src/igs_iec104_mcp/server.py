@@ -15,11 +15,12 @@ import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from igs_iec104_mcp.definitions import service, targets
 from igs_iec104_mcp.definitions.store import ProjectStore, StoreError
+from igs_iec104_mcp.scenarios.confirmation import ElicitingConfirmer
 from igs_iec104_mcp.scenarios.runner import (
     DockerEngine,
     EventsOut,
@@ -163,11 +164,14 @@ def create_server(
     @server.tool(
         name="scenario_run",
         description="Start a run of a scenario: its bench starts, the scenario runs, "
-        "and the bench is removed after it. Returns the run at once, running. Follow "
-        "it with run_get and run_events.",
+        "and the bench is removed after it. Returns the run at once, running. A "
+        "command to an external target is confirmed by a person through the client "
+        "when the client supports it, and is refused otherwise. Follow the run with "
+        "run_get and run_events.",
     )
-    async def scenario_run(name: str) -> RunOut:
-        return run_out(await _acall(lambda: runner.start(name)))
+    async def scenario_run(name: str, ctx: Context) -> RunOut:
+        confirmer = ElicitingConfirmer(ctx.session)
+        return run_out(await _acall(lambda: runner.start(name, confirmer=confirmer)))
 
     @server.tool(
         name="run_get",

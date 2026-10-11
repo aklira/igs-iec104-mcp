@@ -765,3 +765,35 @@ test can show it.
 - Tests: `tests/unit/test_run_reconcile.py` (9 tests, with the fake engine of M2); `tests/integration/test_docker_reconcile.py`,
   where a controller process is killed (SIGKILL) after its first step, a new controller marks the run interrupted, lists
   the bench, removes it with its logs kept in the evidence, and finds no owned resource left.
+
+## D-038: Confirmation of commands to external targets (M3)
+
+- Date: 2026-10-11 (task M3).
+- Decision: a `send_command` step to an external target is confirmed when the step runs, before anything is sent. The
+  confirmation is taken, in order, from: (1) MCP elicitation, when the client supports it, where a person answers a
+  question (only an accepted answer with `confirm` true is a yes; a decline, a cancel, or no answer is a no); (2) a
+  reviewed opt-in in the target definition, when the client cannot be asked; (3) none, which refuses the command. An
+  opt-in does not replace a person the client could ask: when elicitation is supported, the person decides.
+- Definitions: `ExternalTarget.opt_in` (optional): the reviewer, the review date as `YYYY-MM-DD` (an unquoted YAML date
+  is accepted and kept as its text), and the state-changing operations it covers. An opt-in covers only operations the
+  target allows, and only state-changing ones. The bench schema is regenerated.
+- Journal: one `confirmation` event per decision, with the operation, the target, the address, whether it was accepted,
+  how it was decided (`elicitation`, `definition`, or `none`), and the words of the decision. A client that does not
+  answer confirms nothing, and its refusal is recorded.
+- Wiring: `scenario_run` gives the run the client's session. The question is sent by the run's task, after the tool has
+  returned. `scenarios/confirmation.py` holds the decision, the elicitation adapter, and the handler of `send_command`,
+  which refuses a command to a target that does not allow it (a check the start already makes), and a command to a
+  managed client, which stays unsupported.
+- Outcomes: a refused or declined command fails its step. A confirmed command is not carried out, because the planner
+  does not connect external targets: it is UNSUPPORTED, and the run ends in error. The verdict says so.
+- Timing: the question shares the step's own timeout (`send_command` defaults to 10 s). A scenario that waits for a
+  person sets a longer timeout. The bench has started before the step runs: the confirmation guards the command, not
+  the bench.
+- Not in M3: external connections (the planner still refuses them, so no command reaches a real peer); the other
+  state-changing operations (set-point, clock synchronisation, counter freeze and reset), which no scenario step
+  expresses yet; a confirmation for the other tools; the HTTP transport (M4).
+- Tests: `tests/unit/test_run_confirmation.py` (16 tests: a confirmed, declined, and unanswered command; a reviewed opt-in
+  without elicitation; a refusal without either; elicitation preferred to an opt-in; a managed client unsupported; a target
+  that does not allow the command refused at start; the opt-in's rules; the answer's rules) and
+  `tests/integration/test_mcp_confirmation.py` (2 tests on Podman: a real MCP client answers through elicitation and the
+  decision is journaled as confirmed; a client that cannot be asked gets a refusal, and the bench is removed).
