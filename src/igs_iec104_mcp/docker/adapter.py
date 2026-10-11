@@ -303,11 +303,7 @@ class DockerAdapter:
             mem_limit=spec.limits.memory_bytes,
             nano_cpus=round(spec.limits.cpus * 1_000_000_000),
             pids_limit=spec.limits.pids,
-            ports=(
-                {f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)}
-                if spec.publish_control
-                else {}
-            ),
+            ports=_ports_of(spec),
         )
         return Resource("container", str(container.id), name), True
 
@@ -367,3 +363,19 @@ class DockerAdapter:
 def _container_labels(container: Any) -> dict[str, str]:
     labels: dict[str, str] = (container.attrs.get("Config") or {}).get("Labels") or {}
     return labels
+
+
+def _ports_of(spec: ContainerSpec) -> dict[str, Any]:
+    """The ports the engine publishes: the control port at an engine-chosen port on the
+    loopback, or one named port at the address and port the spec names."""
+    if spec.publish_control:
+        return {f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)}
+    if spec.publish is not None:
+        publication = spec.publish
+        return {
+            f"{publication.container_port}/tcp": (
+                publication.bind,
+                publication.host_port,
+            )
+        }
+    return {}

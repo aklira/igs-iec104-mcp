@@ -67,9 +67,24 @@ class PlannedNetwork:
 
 
 @dataclass(frozen=True)
+class PlannedPublication:
+    """A station's published port: the port it listens on in the bench, the host address
+    and port the engine publishes, and the endpoint an external client is given (X2)."""
+
+    port: int
+    bind: str
+    host_port: int
+    advertise: str
+
+
+@dataclass(frozen=True)
 class PlannedRuntime:
-    """A runtime of the bench: its instance, its network, its limits, and its points (a
-    station's points as the runtime reads them; empty for a client)."""
+    """A runtime of the bench: its instance, its network, its limits, and its points.
+
+    The points are a station's, as the runtime reads them; a client has none. A
+    published station has an imposed listening port and its publication; any other
+    runtime binds port 0.
+    """
 
     name: str
     role: str
@@ -79,6 +94,7 @@ class PlannedRuntime:
     event_capacity: int
     points: bytes
     link: LinkParameters
+    publication: PlannedPublication | None = None
 
 
 @dataclass(frozen=True)
@@ -115,12 +131,20 @@ def link_arguments(link: LinkParameters) -> tuple[str, ...]:
 
 
 def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
-    """The runtime's arguments as a station. It binds its listening port itself (port
-    0),
-    and reports the bound address through its readiness."""
+    """The runtime's arguments as a station.
+
+    Without a publication it binds its listening port itself (port 0) and reports the
+    bound address through its readiness. A published station listens on the port its
+    publication names.
+    """
+    listen = (
+        "0.0.0.0:0"
+        if runtime.publication is None
+        else (f"0.0.0.0:{runtime.publication.port}")
+    )
     return (
         "--listen",
-        "0.0.0.0:0",
+        listen,
         "--points",
         runtime_path(POINTS_FILE),
         "--common-address",
@@ -135,10 +159,10 @@ def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
     )
 
 
-def relay_arguments(target: str) -> tuple[str, ...]:
-    """The arguments of a relay: it listens on the control port and forwards to the
-    runtime's control API at `target` (`address:port`)."""
-    return ("--listen", f"0.0.0.0:{CONTROL_PORT}", "--target", target)
+def relay_arguments(target: str, port: int = CONTROL_PORT) -> tuple[str, ...]:
+    """The arguments of a relay: it listens on `port`, the control port by default, and
+    forwards to the runtime at `target` (`address:port`)."""
+    return ("--listen", f"0.0.0.0:{port}", "--target", target)
 
 
 def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
@@ -193,7 +217,17 @@ def plan_bench(bench: TestBench) -> BenchPlan:
 
     servers: list[PlannedRuntime] = []
     clients: list[PlannedRuntime] = []
+    host_ports: dict[int, str] = {}
     for instance in bench.instances:
+        if instance.publish is not None:
+            taken = host_ports.get(instance.publish.host_port)
+            if taken is not None:
+                issues.append(
+                    f"instance {instance.name!r} publishes host port "
+                    f"{instance.publish.host_port}, which {taken!r} publishes too: "
+                    "give each published station its own host port"
+                )
+            host_ports[instance.publish.host_port] = instance.name
         issues.extend(_instance_issues(instance))
         if instance.role == "client" and instance.name not in server_of:
             issues.append(
@@ -237,7 +271,16 @@ def _planned(instance: Instance, issues: list[str]) -> PlannedRuntime | None:
     points = b""
     if instance.role == "server":
         points = _points_file(instance)
+    publication = None
+    if instance.publish is not None:
+        publication = PlannedPublication(
+            port=instance.publish.port,
+            bind=instance.publish.bind,
+            host_port=instance.publish.host_port,
+            advertise=instance.publish.advertise,
+        )
     return PlannedRuntime(
+        publication=publication,
         name=instance.name,
         role=instance.role,
         network=instance.network,

@@ -708,3 +708,26 @@ test can show it.
   allow it is refused, and one that allows it passes; the static report makes no connection; a probe connects once and
   sends nothing; a probe of a reserved, refusing port reports the failure; an undeclared target and an unknown bench are
   not found; a probe timeout out of range is an invalid argument), and the MCP tool list in `test_mcp_stdio.py`.
+
+## D-035: Published station ports reached from outside Docker (X2)
+
+- Date: 2026-10-11 (task X2).
+- Decision: a station can be published: its instance declares `publish` with the port it listens on in the bench
+  (imposed, since a published port cannot be picked by the runtime), the host port, the host address (`bind`, loopback by
+  default), and the endpoint it advertises to external clients (`advertise`, declared, never discovered). Only a station
+  can be published, and two stations cannot publish one host port.
+- Engine: a published station gets its own relay container, on the control network (the only network with a route to
+  the host, D-018), which listens on the station's port and forwards to the station's address. The engine publishes the
+  relay's port on `bind`:`host_port` as the plan names it, never a port it picks. The relay joins the station's network,
+  as the control relay does. Its logs are kept with the evidence, and the owned resources are removed with the bench.
+- Spec: `ContainerSpec` gains one publication (`PortPublication`), with its ports and address checked. A container
+  publishes its control port or one port, not both. The field set test records the new field: the safety of the spec
+  is that it has no mount, privilege, or capability field, not that its fields never grow.
+- Advertised endpoint: `RunningBench.advertised(instance)` returns `advertise:host_port`, as declared.
+- Not in X2: the Docker Desktop and WSL check named by the done-when of X2. The test ran here on Linux with a Podman
+  engine on WSL2; Docker Desktop is not available here. That check belongs to the platform matrix (V4), so X2 stays
+  open until its maintainer decides how to record the Linux result.
+- Tests: `tests/unit/test_publication.py` (the publication's defaults and refusals; only a station; the imposed port; the
+  relay's arguments; a duplicate host port refused; the ports the engine is asked for); `tests/integration/test_docker_publish.py`
+  (a runtime on the host connects to the advertised endpoint, starts its transfer, interrogates, reads 12.5, the bench is
+  removed, and the stop is graceful). The whole integration suite passes on Podman (24 tests).

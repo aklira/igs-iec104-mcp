@@ -9,6 +9,7 @@ move."""
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 
@@ -84,6 +85,32 @@ class NetworkSpec:
 
 
 @dataclass(frozen=True)
+class PortPublication:
+    """A container port the engine publishes on the host: a host address and a host port
+    that the caller names. The engine picks no port here (§6)."""
+
+    container_port: int
+    bind: str
+    host_port: int
+
+    def __post_init__(self) -> None:
+        for value, what in (
+            (self.container_port, "container"),
+            (self.host_port, "host"),
+        ):
+            if not 1 <= value <= 65535:
+                raise SpecError(
+                    f"the {what} port {value} is out of range: use 1 to 65535"
+                )
+        try:
+            ipaddress.ip_address(self.bind)
+        except ValueError as error:
+            raise SpecError(
+                f"{self.bind!r} is not an IP address to publish on"
+            ) from error
+
+
+@dataclass(frozen=True)
 class ContainerSpec:
     """A runtime container: its instance, its image, its network (by name in the
     bench), its limits, and the arguments of the runtime. It has no bind mount, no
@@ -95,10 +122,15 @@ class ContainerSpec:
     limits: Limits = field(default_factory=Limits)
     arguments: tuple[str, ...] = ()
     publish_control: bool = False
+    publish: PortPublication | None = None
 
     def __post_init__(self) -> None:
         check_plain_name(self.instance, "instance")
         check_plain_name(self.network, "network")
+        if self.publish_control and self.publish is not None:
+            raise SpecError(
+                "a container publishes its control port or one port, not both"
+            )
         if not IMAGE_PATTERN.fullmatch(self.image):
             raise SpecError(
                 f"image {self.image!r} is not a digest: write the repository digest "

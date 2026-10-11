@@ -43,6 +43,7 @@ from igs_iec104_mcp.docker.specs import (
     CONTROL_PORT,
     ContainerSpec,
     NetworkSpec,
+    PortPublication,
     part_of,
     resource_name,
 )
@@ -66,13 +67,16 @@ class BenchError(DockerError):
 class Member:
     """A runtime of a running bench: its plan, its container, its relay, the control
     address the host reaches through the relay, and the address its station bound (None
-    for a client)."""
+    for a client). A published station also has the relay of its IEC port, and the
+    endpoint it advertises (X2); the other fields are None for the others."""
 
     runtime: PlannedRuntime
     resource: Resource
     relay: Resource
     control: str
     listen: str | None
+    publication: Resource | None = None
+    advertised: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,11 @@ class RunningBench:
         """A control client for one runtime, through its relay. The caller closes it."""
         return ControlClient(self.members[instance].control, self.token)
 
+    def advertised(self, instance: str) -> str | None:
+        """The endpoint a published station advertises to external clients, as the plan
+        declares it: `advertise:host_port`. None for a station that is not published."""
+        return self.members[instance].advertised
+
     async def stop(self, grace: int = 10) -> StopReport:
         """Stops the clients, then the stations, with SIGTERM and a deadline of `grace`
         seconds. Each runtime's logs and record, and its relay's, are kept before the
@@ -120,6 +129,13 @@ class RunningBench:
                 await _preserve(
                     self._adapter, member.relay, f"relay-{name}", self.evidence
                 )
+                if member.publication is not None:
+                    await _preserve(
+                        self._adapter,
+                        member.publication,
+                        f"publication-{name}",
+                        self.evidence,
+                    )
         finally:
             removed = await self._adapter.remove_owned(self.ownership)
         report = StopReport(exit_codes=exit_codes, removed=len(removed))
@@ -314,6 +330,13 @@ async def _launch(
     )
     await adapter.start_container(relay)
     control = await _control_address(adapter, relay)
+    publication: Resource | None = None
+    advertised: str | None = None
+    if runtime.publication is not None:
+        publication = await _publish(
+            adapter, creation, ownership, runtime, relay_id, ip, steps
+        )
+        advertised = f"{runtime.publication.advertise}:{runtime.publication.host_port}"
     await steps(f"ready:{name}")
     body = await _await(
         adapter, resource, control, token, ready_timeout, lambda body: body["ready"]
@@ -337,7 +360,49 @@ async def _launch(
         relay=relay,
         control=control,
         listen=listen,
+        publication=publication,
+        advertised=advertised,
     )
+
+
+async def _publish(
+    adapter: DockerAdapter,
+    creation: Creation,
+    ownership: Ownership,
+    runtime: PlannedRuntime,
+    relay_id: str,
+    ip: str,
+    steps: _Steps,
+) -> Resource:
+    """The relay of a published station's IEC port: it listens on the port the station
+    listens on, and the engine publishes it on the address and host port of the plan. It
+    joins the station's network, as the control relay does."""
+    publication = runtime.publication
+    if publication is None:
+        raise BenchError(f"{runtime.name} is not published")
+    name = runtime.name
+    await steps(f"publish:{name}")
+    resource = await creation.container(
+        ContainerSpec(
+            instance=f"iec-{name}",
+            image=relay_id,
+            network=CONTROL_NETWORK,
+            limits=RELAY_LIMITS,
+            arguments=relay_arguments(
+                f"{ip}:{publication.port}", port=publication.port
+            ),
+            publish=PortPublication(
+                container_port=publication.port,
+                bind=publication.bind,
+                host_port=publication.host_port,
+            ),
+        )
+    )
+    await adapter.connect_network(
+        resource, resource_name(ownership, runtime.network), ownership
+    )
+    await adapter.start_container(resource)
+    return resource
 
 
 async def _control_address(adapter: DockerAdapter, relay: Resource) -> str:

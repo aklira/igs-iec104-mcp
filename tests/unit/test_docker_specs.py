@@ -92,6 +92,7 @@ def test_a_container_has_no_field_for_a_mount_a_privilege_or_a_capability() -> N
         "limits",
         "arguments",
         "publish_control",
+        "publish",
     }
     with pytest.raises(TypeError):
         ContainerSpec(  # type: ignore[call-arg]

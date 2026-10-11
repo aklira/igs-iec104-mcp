@@ -9,9 +9,10 @@ does not refuse them."""
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Literal
 
-from pydantic import Field, StrictInt, model_validator
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from igs_iec104_mcp.models.common import CommonAddress, Definition, Name
 from igs_iec104_mcp.models.points import Point
@@ -89,6 +90,51 @@ class ResourceLimits(Definition):
     )
 
 
+class Publication(Definition):
+    """A station's IEC 104 port made reachable from outside Docker (§6, task X2).
+
+    The station listens on `port` inside the bench, so that port is imposed, and the
+    engine publishes it on `bind`:`host_port`. `advertise` is the endpoint an external
+    client is given: it is declared, never discovered.
+    """
+
+    port: StrictInt = Field(
+        ge=1, le=65535, description="The station's port in the bench."
+    )
+    host_port: StrictInt = Field(
+        ge=1, le=65535, description="The host port the engine publishes."
+    )
+    bind: str = Field(
+        default="127.0.0.1",
+        description="The host address the port is published on. The default keeps it "
+        "on the loopback; a wider address is an explicit choice.",
+    )
+    advertise: str = Field(
+        min_length=1,
+        max_length=253,
+        description="The host name or address an external client connects to.",
+    )
+
+    @field_validator("bind")
+    @classmethod
+    def _an_address(cls, value: str) -> str:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError as error:
+            raise ValueError(f"{value!r} is not an IP address to publish on") from error
+        return value
+
+    @field_validator("advertise")
+    @classmethod
+    def _no_spaces(cls, value: str) -> str:
+        if any(character.isspace() for character in value):
+            raise ValueError(
+                f"the advertised endpoint {value!r} contains a space: write the host "
+                "only, and give the port in host_port"
+            )
+        return value
+
+
 class Instance(Definition):
     """A runtime of the bench: a client of a station, or a station."""
 
@@ -101,9 +147,17 @@ class Instance(Definition):
     parameters: LinkParameters = Field(default_factory=LinkParameters)
     points: list[Point] = Field(default_factory=list)
     limits: ResourceLimits = Field(default_factory=ResourceLimits)
+    publish: Publication | None = Field(
+        default=None,
+        description="Make a station reachable from outside Docker (§6). Stations only.",
+    )
 
     @model_validator(mode="after")
     def _check_points(self) -> Instance:
+        if self.role == "client" and self.publish is not None:
+            raise ValueError(
+                f"instance {self.name!r} is a client: only a station can be published"
+            )
         if self.role == "client" and self.points:
             raise ValueError(
                 f"instance {self.name!r} is a client, which serves no points: move "

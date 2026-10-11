@@ -167,6 +167,18 @@
           "title": "Points",
           "type": "array"
         },
+        "publish": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Publication"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Make a station reachable from outside Docker (\u00a76). Stations only."
+        },
         "role": {
           "enum": [
             "client",
@@ -339,6 +351,46 @@
       ],
       "title": "PointKind",
       "type": "string"
+    },
+    "Publication": {
+      "additionalProperties": false,
+      "description": "A station's IEC 104 port made reachable from outside Docker (\u00a76, task X2).\n\nThe station listens on `port` inside the bench, so that port is imposed, and the\nengine publishes it on `bind`:`host_port`. `advertise` is the endpoint an external\nclient is given: it is declared, never discovered.",
+      "properties": {
+        "advertise": {
+          "description": "The host name or address an external client connects to.",
+          "maxLength": 253,
+          "minLength": 1,
+          "title": "Advertise",
+          "type": "string"
+        },
+        "bind": {
+          "default": "127.0.0.1",
+          "description": "The host address the port is published on. The default keeps it on the loopback; a wider address is an explicit choice.",
+          "title": "Bind",
+          "type": "string"
+        },
+        "host_port": {
+          "description": "The host port the engine publishes.",
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Host Port",
+          "type": "integer"
+        },
+        "port": {
+          "description": "The station's port in the bench.",
+          "maximum": 65535,
+          "minimum": 1,
+          "title": "Port",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "port",
+        "host_port",
+        "advertise"
+      ],
+      "title": "Publication",
+      "type": "object"
     },
     "ResourceLimits": {
       "additionalProperties": false,
