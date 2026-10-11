@@ -102,13 +102,22 @@ def test_every_kind_of_the_model_is_served_by_the_runtime() -> None:
     assert {str(kind) for kind in PointKind} == plan.SERVED_KINDS
 
 
-def test_link_parameters_other_than_the_defaults_are_refused_by_name() -> None:
+def test_link_parameters_are_passed_to_the_runtime_as_flags() -> None:
     data = copy.deepcopy(BENCH)
-    instance(data, "client-1")["parameters"] = {"t0": 60, "k": 4}
-    (issue,) = refused(data)
-    assert "client-1" in issue
-    assert "t0, k" in issue
-    assert "S5" in issue
+    instance(data, "client-1")["parameters"] = {"t1": 20, "t2": 5, "k": 4}
+    plan_ = plan_bench(Bench.model_validate(data))
+    arguments = client_arguments(plan_.clients[0], "172.18.0.2:2404")
+    assert arguments[arguments.index("--t1") + 1] == "20"
+    assert arguments[arguments.index("--t2") + 1] == "5"
+    assert arguments[arguments.index("--k") + 1] == "4"
+    assert arguments[arguments.index("--t0") + 1] == "30"
+    assert arguments[arguments.index("--w") + 1] == "8"
+
+
+def test_a_station_gets_its_link_flags_too() -> None:
+    station = plan_bench(Bench.model_validate(BENCH)).servers[0]
+    arguments = server_arguments(station)
+    assert arguments[arguments.index("--t3") + 1] == "20"
 
 
 def test_a_connection_across_two_networks_is_refused_by_the_model() -> None:
@@ -158,8 +167,8 @@ def test_a_client_with_two_connections_is_refused() -> None:
 
 def test_every_problem_is_reported_together() -> None:
     data = copy.deepcopy(BENCH)
-    instance(data, "client-1")["parameters"] = {"w": 4}
     data["connections"] = []
+    instance(data, "server-1")["limits"] = {"pids": 8}
     assert len(refused(data)) == 2
 
 

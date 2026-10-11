@@ -19,7 +19,7 @@ async fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
-        Ok(Invocation::Run(config)) => run(config).await,
+        Ok(Invocation::Run(config)) => run(*config).await,
         Err(error) => {
             eprintln!("igs-iec104-runtime: {error}\n\n{USAGE}");
             ExitCode::from(2)

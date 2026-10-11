@@ -431,3 +431,22 @@ test can show it.
 - Tests: `points.rs` (the forms, the refusals, the simulation refusal), `image.rs` (the packed and unqualified
   readings), `tests/station.rs` (the two kinds are served, and their updates reach a client as M_PS_NA_1 and
   M_ME_ND_1 readings with their values), `tests/unit/test_docker_plan.py` (every model kind is served).
+
+## D-025: The link flags of the runtime (S5)
+
+- Date: 2026-10-11 (task S5).
+- Decision: the runtime takes `--t0`, `--t1`, `--t2`, `--t3` (whole seconds), `--k`, and `--w` (1 to 32767), with
+  the defaults of §9.6 when a flag is absent. The values are checked with the rules of the upstream link
+  configuration (`LinkConfig::new`, the same rule the library applies to a station and to a client): a timeout
+  out of its range, t2 not below t1, and a window out of its range are refused, naming the parameter. The check
+  runs when the command line is read, and again when the runtime binds, so a configuration built in code is
+  checked too. The runtime's configuration is boxed in `Invocation::Run` (the parameters make it large).
+- The plan passes all six flags to every runtime, the defaults included, so the values a run uses are the ones
+  in its plan (`docker/plan.py`). The plan no longer refuses link parameters; its refusal, of D-016, is removed.
+- Contract: no change. The flags are command-line arguments; the control API does not report them.
+- Tests: `config.rs` (the defaults; each flag sets its parameter; each library rule refused by its parameter;
+  the station checks its own role), `tests/client_role.rs` (a t1 of 2 seconds ends a link whose start is never
+  confirmed, in under 9 seconds; the default t1 of 15 seconds does not, which the test was checked against),
+  `tests/unit/test_docker_plan.py` (the flags are in the arguments of a client and of a station), and
+  `tests/integration/test_docker_bench.py` (a bench with non-default parameters starts, and the flags are in the
+  container's command).

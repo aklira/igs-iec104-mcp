@@ -5,7 +5,9 @@
 
 mod common;
 
+use igs_iec104_link::Parameters;
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use common::{get, has_event, post, send, wait_for, TokenFile};
 use igs_iec104::process_image::PointValue;
@@ -61,6 +63,7 @@ fn config(connect: SocketAddr, token: &TokenFile) -> Config {
         common_address: 1,
         control: DEFAULT_CONTROL,
         event_capacity: DEFAULT_EVENT_CAPACITY,
+        parameters: Parameters::default(),
         control_token: token.0.clone(),
     }
 }
@@ -246,6 +249,60 @@ async fn a_counter_interrogation_brings_the_counters_into_the_image() {
         .expect("the counter is in the image");
     assert_eq!(counter["value"], 42);
     assert_eq!(counter["type_id"], 15);
+
+    let _ = stop.send(());
+    serving
+        .await
+        .expect("the runtime task ends")
+        .expect("the control API stops without an error");
+}
+
+/// A peer that accepts connections and never answers: the frames the client sends are not confirmed.
+async fn silent_peer() -> SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port is free");
+    let address = listener.local_addr().expect("the port has an address");
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream);
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_short_t1_ends_a_link_whose_start_is_never_confirmed_sooner_than_the_default() {
+    let token = TokenFile::new("s5-t1");
+    let mut config = config(silent_peer().await, &token);
+    config.parameters = Parameters {
+        t1: Duration::from_secs(2),
+        t2: Duration::from_secs(1),
+        ..Parameters::default()
+    };
+    let runtime = Runtime::bind(config).await.expect("the runtime binds");
+    let control = runtime.control_address();
+    let (stop, stopped) = oneshot::channel::<()>();
+    let serving = tokio::spawn(runtime.serve(async {
+        let _ = stopped.await;
+    }));
+    wait_for(control, "/v1/ready", |body| body["connection"] == "up").await;
+
+    let started = Instant::now();
+    let (status, _) = send(control, "POST", "/v1/transfer/start", None).await;
+    assert_eq!(status, 202);
+    // The start is never confirmed, so t1 ends the link: the client reports the end of the
+    // connection. The default t1 of 15 seconds would not end it within the patience of the test.
+    wait_for(control, "/v1/events", |body| {
+        has_event(body, |event| event["kind"] == "disconnected")
+    })
+    .await;
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(9),
+        "the link ended after {elapsed:?}, not after t1"
+    );
 
     let _ = stop.send(());
     serving

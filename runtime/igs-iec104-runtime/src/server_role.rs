@@ -152,6 +152,8 @@ pub struct StationSettings {
     pub event_capacity: NonZeroUsize,
     /// How long a selection waits for its execution.
     pub selection_timeout: Duration,
+    /// The link parameters of the station's connections.
+    pub parameters: igs_iec104_link::Parameters,
 }
 
 /// Binds the station on `listen`, and registers `points` before it runs. The commands are judged by
@@ -175,6 +177,7 @@ pub async fn bind(
     let mut config = ServerConfig::new(listen, CommonAddress::new(settings.common_address))
         .with_events(settings.event_capacity);
     config.selection_timeout = settings.selection_timeout;
+    config.parameters = settings.parameters;
     let mut server = Server::bind(config, handler)
         .await
         .map_err(StationError::Bind)?;

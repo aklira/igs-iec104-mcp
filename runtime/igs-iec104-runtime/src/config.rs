@@ -5,6 +5,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use igs_iec104_link::{ConfigError as LinkError, LinkConfig, Parameters, Role as LinkRole};
+
 /// The control address when none is given: loopback, on a port the runtime chooses (§6).
 pub const DEFAULT_CONTROL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
 /// The number of events kept for the control API before the oldest are dropped.
@@ -49,6 +51,9 @@ pub struct Config {
     pub control: SocketAddr,
     /// The number of events kept before the oldest are dropped.
     pub event_capacity: usize,
+    /// The link parameters: the timeouts t0 to t3 and the window sizes k and w. The defaults are the
+    /// ones of IEC 60870-5-104 §9.6 (D-020).
+    pub parameters: Parameters,
     /// The file with the control token (see `token`). It is required.
     pub control_token: PathBuf,
 }
@@ -60,8 +65,8 @@ pub enum Invocation {
     Banner,
     /// `--help`: print the usage and exit.
     Usage,
-    /// Run the runtime.
-    Run(Config),
+    /// Run the runtime. The configuration is boxed: the link parameters make it large.
+    Run(Box<Config>),
 }
 
 /// A command line that the runtime cannot run.
@@ -88,6 +93,8 @@ pub enum ConfigError {
         /// The value as given.
         value: String,
     },
+    /// The link parameters are not valid: the library's rule, as it names the parameter.
+    Link(LinkError),
 }
 
 impl fmt::Display for ConfigError {
@@ -106,6 +113,7 @@ impl fmt::Display for ConfigError {
             }
             Self::MissingToken => write!(f, "--control-token-file FILE is required"),
             Self::Invalid { option, value } => write!(f, "invalid value {value:?} for {option}"),
+            Self::Link(error) => write!(f, "the link parameters are not valid: {error}"),
         }
     }
 }
@@ -123,6 +131,12 @@ pub const USAGE: &str =
   --control ADDRESS         the address of the control API (default 127.0.0.1:0)
   --event-capacity N        the events kept for the control API (default 1024)
   --selection-timeout-ms N  how long a station keeps a selection (default 30000)
+  --t0 SECONDS              the connection establishment time-out (default 30)
+  --t1 SECONDS              the time-out of the frames sent (default 15)
+  --t2 SECONDS              the time-out of the acknowledgements, below t1 (default 10)
+  --t3 SECONDS              the idle time before a test frame (default 20)
+  --k N                     the unacknowledged I frames a sender may have, 1 to 32767 (default 12)
+  --w N                     the I frames received before an acknowledgement, 1 to 32767 (default 8)
   --control-token-file FILE the file with the control token, required
   -h, --help                print this usage
 
@@ -145,6 +159,7 @@ where
     let mut control = DEFAULT_CONTROL;
     let mut event_capacity = DEFAULT_EVENT_CAPACITY;
     let mut selection_timeout_ms = DEFAULT_SELECTION_TIMEOUT_MS;
+    let mut parameters = Parameters::default();
     let mut control_token = None;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -173,6 +188,26 @@ where
                     1..=MAX_SELECTION_TIMEOUT_MS,
                 )?;
             }
+            "--t0" => {
+                parameters.t0 = seconds("--t0", &value("--t0", &mut arguments)?)?;
+            }
+            "--t1" => {
+                parameters.t1 = seconds("--t1", &value("--t1", &mut arguments)?)?;
+            }
+            "--t2" => {
+                parameters.t2 = seconds("--t2", &value("--t2", &mut arguments)?)?;
+            }
+            "--t3" => {
+                parameters.t3 = seconds("--t3", &value("--t3", &mut arguments)?)?;
+            }
+            "--k" => {
+                let text = value("--k", &mut arguments)?;
+                parameters.k = window("--k", &text)?;
+            }
+            "--w" => {
+                let text = value("--w", &mut arguments)?;
+                parameters.w = window("--w", &text)?;
+            }
             "--control-token-file" => {
                 control_token = Some(PathBuf::from(value(
                     "--control-token-file",
@@ -183,6 +218,10 @@ where
         }
     }
 
+    let link_role = match (connect.is_some(), listen.is_some()) {
+        (true, false) => LinkRole::Controlling,
+        _ => LinkRole::Controlled,
+    };
     let role = match (connect, listen) {
         (Some(_), Some(_)) => return Err(ConfigError::ConflictingRoles),
         (None, None) => return Err(ConfigError::MissingRole),
@@ -199,13 +238,15 @@ where
         },
     };
     let control_token = control_token.ok_or(ConfigError::MissingToken)?;
-    Ok(Invocation::Run(Config {
+    LinkConfig::new(link_role, parameters).map_err(ConfigError::Link)?;
+    Ok(Invocation::Run(Box::new(Config {
         role,
         common_address,
         control,
         event_capacity,
+        parameters,
         control_token,
-    }))
+    })))
 }
 
 fn value<I: Iterator<Item = String>>(
@@ -235,6 +276,17 @@ where
     }
 }
 
+/// A timeout in whole seconds. Its range is checked with the link parameters, as the library gives it.
+fn seconds(option: &'static str, text: &str) -> Result<Duration, ConfigError> {
+    let value: u64 = text.parse().map_err(|_| invalid(option, text))?;
+    Ok(Duration::from_secs(value))
+}
+
+/// A window size, checked with the link parameters, as the library gives it.
+fn window(option: &'static str, text: &str) -> Result<u16, ConfigError> {
+    text.parse().map_err(|_| invalid(option, text))
+}
+
 fn invalid(option: &'static str, value: &str) -> ConfigError {
     ConfigError::Invalid {
         option,
@@ -255,7 +307,7 @@ mod tests {
         let mut with_token = list.to_vec();
         with_token.extend(["--control-token-file", "token.txt"]);
         match parse(args(&with_token))? {
-            Invocation::Run(config) => Ok(config),
+            Invocation::Run(config) => Ok(*config),
             other => panic!("expected a run, got {other:?}"),
         }
     }
@@ -411,6 +463,115 @@ mod tests {
                 option: "--event-capacity",
                 ..
             })
+        ));
+    }
+
+    const CLIENT: &[&str] = &["--connect", "127.0.0.1:2404"];
+
+    fn client_with(extra: &[&str]) -> Result<Config, ConfigError> {
+        let mut list = CLIENT.to_vec();
+        list.extend_from_slice(extra);
+        run(&list)
+    }
+
+    #[test]
+    fn the_link_parameters_are_the_defaults_of_the_section_9_6_when_no_flag_is_given() {
+        let config = client_with(&[]).expect("a client with the defaults");
+        assert_eq!(config.parameters, Parameters::default());
+        assert_eq!(config.parameters.t0, Duration::from_secs(30));
+        assert_eq!(config.parameters.t1, Duration::from_secs(15));
+        assert_eq!(config.parameters.t2, Duration::from_secs(10));
+        assert_eq!(config.parameters.t3, Duration::from_secs(20));
+        assert_eq!((config.parameters.k, config.parameters.w), (12, 8));
+    }
+
+    #[test]
+    fn each_link_flag_sets_its_parameter() {
+        let config = client_with(&[
+            "--t0", "40", "--t1", "20", "--t2", "5", "--t3", "60", "--k", "4", "--w", "3",
+        ])
+        .expect("valid parameters");
+        let parameters = config.parameters;
+        assert_eq!(parameters.t0, Duration::from_secs(40));
+        assert_eq!(parameters.t1, Duration::from_secs(20));
+        assert_eq!(parameters.t2, Duration::from_secs(5));
+        assert_eq!(parameters.t3, Duration::from_secs(60));
+        assert_eq!((parameters.k, parameters.w), (4, 3));
+    }
+
+    #[test]
+    fn a_timeout_outside_its_range_is_refused_by_the_library_rule() {
+        for flag in [&["--t0", "0"][..], &["--t0", "256"][..]] {
+            assert!(
+                matches!(
+                    client_with(flag),
+                    Err(ConfigError::Link(LinkError::TimeoutOutOfRange {
+                        parameter: "t0",
+                        ..
+                    }))
+                ),
+                "{flag:?} is refused for t0"
+            );
+        }
+    }
+
+    #[test]
+    fn t2_must_be_below_t1_as_the_library_rule_says() {
+        assert!(matches!(
+            client_with(&["--t1", "5"]),
+            Err(ConfigError::Link(LinkError::T2NotBelowT1 { .. }))
+        ));
+        assert!(client_with(&["--t1", "5", "--t2", "4"]).is_ok());
+    }
+
+    #[test]
+    fn a_window_outside_one_to_32767_is_refused_by_the_library_rule() {
+        assert!(matches!(
+            client_with(&["--k", "0"]),
+            Err(ConfigError::Link(LinkError::WindowOutOfRange {
+                parameter: "k",
+                ..
+            }))
+        ));
+        assert!(matches!(
+            client_with(&["--w", "32768"]),
+            Err(ConfigError::Link(LinkError::WindowOutOfRange {
+                parameter: "w",
+                ..
+            }))
+        ));
+        assert!(client_with(&["--k", "32767", "--w", "1"]).is_ok());
+    }
+
+    #[test]
+    fn a_link_flag_that_is_not_a_number_is_invalid_and_one_without_a_value_is_missing() {
+        assert!(matches!(
+            client_with(&["--t1", "1.5"]),
+            Err(ConfigError::Invalid { option: "--t1", .. })
+        ));
+        assert!(matches!(
+            client_with(&["--k", "70000"]),
+            Err(ConfigError::Invalid { option: "--k", .. })
+        ));
+        assert!(matches!(
+            parse(args(&["--connect", "127.0.0.1:2404", "--w"])),
+            Err(ConfigError::MissingValue("--w"))
+        ));
+    }
+
+    #[test]
+    fn the_station_checks_its_parameters_with_its_own_role() {
+        let station = run(&[
+            "--listen",
+            "127.0.0.1:2404",
+            "--points",
+            "points.json",
+            "--t1",
+            "5",
+        ]);
+        assert!(matches!(
+            station,
+            Err(ConfigError::Link(LinkError::T2NotBelowT1 { .. }))
         ));
     }
 }

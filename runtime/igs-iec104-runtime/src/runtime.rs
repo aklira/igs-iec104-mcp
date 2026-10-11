@@ -117,12 +117,15 @@ pub enum BindError {
     Station(StationError),
     /// The control token cannot be used.
     Token(TokenError),
+    /// The link parameters are not valid for the role.
+    Link(igs_iec104_link::ConfigError),
 }
 
 impl fmt::Display for BindError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(f, "an address could not be bound: {error}"),
+            Self::Link(error) => write!(f, "the link parameters are not valid: {error}"),
             Self::Points(error) => write!(f, "{error}"),
             Self::Station(error) => write!(f, "{error}"),
             Self::Token(error) => write!(f, "{error}"),
@@ -142,8 +145,10 @@ impl Runtime {
         let control_address = control.local_addr().map_err(BindError::Io)?;
         let (engine, client, server) = match config.role {
             Role::Client { connect } => {
-                let client =
-                    Client::connect(client_role::client_config(connect, config.common_address));
+                let client_config =
+                    client_role::client_config(connect, config.common_address, config.parameters)
+                        .map_err(BindError::Link)?;
+                let client = Client::connect(client_config);
                 let (requests_tx, requests) = mpsc::channel(REQUEST_QUEUE);
                 let recorder = Arc::new(Recorder::new(config.event_capacity));
                 let link = ClientLink {
@@ -169,6 +174,7 @@ impl Runtime {
                     event_capacity: NonZeroUsize::new(config.event_capacity)
                         .unwrap_or(NonZeroUsize::MIN),
                     selection_timeout,
+                    parameters: config.parameters,
                 };
                 let station = server_role::bind(listen, settings, points)
                     .await

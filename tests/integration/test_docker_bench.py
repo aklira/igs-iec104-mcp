@@ -235,11 +235,11 @@ async def test_a_bench_that_does_not_plan_creates_nothing(
     adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
 ) -> None:
     data = basic_pair_data()
-    next(item for item in data["instances"] if item["name"] == "client-1")[
-        "parameters"
-    ] = {"t0": 60}
+    next(item for item in data["instances"] if item["name"] == "client-1")["limits"] = {
+        "pids": 8
+    }
     run = new_ownership()
-    with pytest.raises(PlanError, match="t0"):
+    with pytest.raises(PlanError, match="pids"):
         await start_bench(
             adapter,
             TestBench.model_validate(data),
@@ -249,4 +249,36 @@ async def test_a_bench_that_does_not_plan_creates_nothing(
             relay=relay_image,
             evidence=bench_run_dir / run.run,
         )
+    assert await adapter.owned(run) == []
+
+
+async def test_non_default_link_parameters_reach_the_runtime(
+    adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
+) -> None:
+    """A bench whose client sets its link parameters starts. The runtime is given them
+    as flags (D-025): they are in the container's command, and the link is up."""
+    data = basic_pair_data()
+    next(item for item in data["instances"] if item["name"] == "client-1")[
+        "parameters"
+    ] = {"t1": 20, "t2": 5, "k": 4}
+    run = new_ownership()
+    running = await start_bench(
+        adapter,
+        TestBench.model_validate(data),
+        project=PROJECT,
+        run=run.run,
+        image=runtime_image,
+        relay=relay_image,
+        evidence=bench_run_dir / run.run,
+    )
+    try:
+        client = await connected(running, "client-1")
+        assert client["connection"] == "up"
+        record = await adapter.inspect(running.members["client-1"].resource)
+        command = record["Config"]["Cmd"]
+        assert command[command.index("--t1") + 1] == "20"
+        assert command[command.index("--t2") + 1] == "5"
+        assert command[command.index("--k") + 1] == "4"
+    finally:
+        await running.stop(grace=10)
     assert await adapter.owned(run) == []

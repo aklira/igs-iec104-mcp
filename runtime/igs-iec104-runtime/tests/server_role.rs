@@ -3,6 +3,7 @@
 
 mod common;
 
+use igs_iec104_link::Parameters;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -65,6 +66,7 @@ impl Running {
             common_address: 1,
             control: DEFAULT_CONTROL,
             event_capacity: DEFAULT_EVENT_CAPACITY,
+            parameters: Parameters::default(),
             control_token: token.0.clone(),
         };
         let runtime = Runtime::bind(config).await.expect("the runtime binds");

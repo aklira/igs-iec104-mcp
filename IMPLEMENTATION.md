@@ -586,7 +586,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | D1 Docker adapter and labels | [x] |
 | D2 Test bench lifecycle | [x] |
 | S4 Runtime point kinds | [x] |
-| S5 Runtime link flags | [ ] |
+| S5 Runtime link flags | [x] |
 | D3 Reconciliation | [ ] |
 | E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [ ] |

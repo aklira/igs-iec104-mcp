@@ -16,6 +16,7 @@ use igs_iec104_codec::asdu::Asdu;
 use igs_iec104_codec::elements::{CounterFreeze, Qcc, Qoc, Qoi, Sco};
 use igs_iec104_codec::header::{CommonAddress, InformationObjectAddress};
 use igs_iec104_link::TransferState;
+use igs_iec104_link::{ConfigError as LinkError, Parameters};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant as TokioInstant;
@@ -137,11 +138,16 @@ pub enum Request {
 }
 
 /// The configuration of the client of the runtime for the station at `connect`.
-pub fn client_config(connect: std::net::SocketAddr, common_address: u16) -> ClientConfig {
+pub fn client_config(
+    connect: std::net::SocketAddr,
+    common_address: u16,
+    parameters: Parameters,
+) -> Result<ClientConfig, LinkError> {
     let mut config = ClientConfig::new(connect, CommonAddress::new(common_address))
-        .with_offline_requests(OfflineRequests::Discard);
+        .with_offline_requests(OfflineRequests::Discard)
+        .with_parameters(parameters)?;
     config.capacity = CLIENT_CAPACITY;
-    config
+    Ok(config)
 }
 
 /// Runs the client until its requests end or the client stops.
@@ -497,9 +503,12 @@ mod tests {
 
     #[test]
     fn the_client_keeps_every_channel_above_the_open_request_bound() {
-        assert_eq!(
-            client_config("127.0.0.1:2404".parse().expect("address"), 1).capacity,
-            CLIENT_CAPACITY
-        );
+        let config = client_config(
+            "127.0.0.1:2404".parse().expect("address"),
+            1,
+            Parameters::default(),
+        )
+        .expect("the defaults are valid");
+        assert_eq!(config.capacity, CLIENT_CAPACITY);
     }
 }

@@ -44,8 +44,6 @@ SERVED_KINDS: frozenset[str] = frozenset(
         "normalized_unqualified",
     }
 )
-# The link parameters the runtime uses: the defaults of §9.6, which the model carries.
-RUNTIME_PARAMETERS = LinkParameters()
 POINTS_FILE = "points.json"
 TOKEN_FILE = "control-token"
 MIB = 1024 * 1024
@@ -80,6 +78,7 @@ class PlannedRuntime:
     limits: Limits
     event_capacity: int
     points: bytes
+    link: LinkParameters
 
 
 @dataclass(frozen=True)
@@ -94,6 +93,25 @@ class BenchPlan:
 def runtime_path(name: str) -> str:
     """Where a file of the run directory is inside the container."""
     return f"{RUN_DIRECTORY}/{name}"
+
+
+def link_arguments(link: LinkParameters) -> tuple[str, ...]:
+    """The link parameters as the runtime's flags (D-020). Every flag is given, so the
+    values a run uses are the ones in its plan, defaults included."""
+    return (
+        "--t0",
+        str(link.t0),
+        "--t1",
+        str(link.t1),
+        "--t2",
+        str(link.t2),
+        "--t3",
+        str(link.t3),
+        "--k",
+        str(link.k),
+        "--w",
+        str(link.w),
+    )
 
 
 def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
@@ -113,6 +131,7 @@ def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
         runtime_path(TOKEN_FILE),
         "--event-capacity",
         str(runtime.event_capacity),
+        *link_arguments(runtime.link),
     )
 
 
@@ -136,6 +155,7 @@ def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
         runtime_path(TOKEN_FILE),
         "--event-capacity",
         str(runtime.event_capacity),
+        *link_arguments(runtime.link),
     )
 
 
@@ -199,17 +219,6 @@ def plan_bench(bench: TestBench) -> BenchPlan:
 
 def _instance_issues(instance: Instance) -> list[str]:
     issues = []
-    differing = [
-        name
-        for name in LinkParameters.model_fields
-        if getattr(instance.parameters, name) != getattr(RUNTIME_PARAMETERS, name)
-    ]
-    if differing:
-        issues.append(
-            f"instance {instance.name!r} sets link parameters "
-            f"({', '.join(differing)}) that the runtime does not take yet: use the "
-            "defaults until task S5 takes the flags (D-020)"
-        )
     unserved = sorted({str(point.kind) for point in instance.points} - SERVED_KINDS)
     if unserved:
         issues.append(
@@ -236,6 +245,7 @@ def _planned(instance: Instance, issues: list[str]) -> PlannedRuntime | None:
         limits=limits,
         event_capacity=instance.limits.event_buffer,
         points=points,
+        link=instance.parameters,
     )
 
 

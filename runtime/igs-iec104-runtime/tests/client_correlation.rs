@@ -7,6 +7,7 @@
 
 mod common;
 
+use igs_iec104_link::Parameters;
 use std::net::SocketAddr;
 
 use common::{get, has_event, post, send, wait_for, TokenFile};
@@ -114,6 +115,7 @@ impl Client {
             common_address: 1,
             control: DEFAULT_CONTROL,
             event_capacity: DEFAULT_EVENT_CAPACITY,
+            parameters: Parameters::default(),
             control_token: token.0.clone(),
         };
         let runtime = Runtime::bind(config).await.expect("the runtime binds");
