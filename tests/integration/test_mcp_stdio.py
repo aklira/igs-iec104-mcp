@@ -32,6 +32,8 @@ TOOLS = {
     "run_events",
     "run_cancel",
     "target_validate",
+    "bench_recovered",
+    "bench_recovered_remove",
 }
 
 

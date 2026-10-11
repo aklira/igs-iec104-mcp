@@ -350,6 +350,16 @@ class RunStore:
             next_cursor=page[-1][0] if more and page else None,
         )
 
+    def unended(self) -> list[RunRecord]:
+        """Every run that has not ended, pending or running, in creation order."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, bench, scenario, status, created_at_ms, ended_at_ms, "
+                "events, dropped FROM runs WHERE status IN (?, ?) ORDER BY seq",
+                (RunStatus.PENDING.value, RunStatus.RUNNING.value),
+            ).fetchall()
+        return [_record(row) for row in rows]
+
     def _migrate(self) -> None:
         version = int(self._db.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:

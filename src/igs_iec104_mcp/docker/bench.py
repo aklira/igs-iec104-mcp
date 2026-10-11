@@ -217,6 +217,21 @@ async def start_bench(
     )
 
 
+async def recover(
+    adapter: DockerAdapter, owner: Ownership, evidence: Path | None
+) -> list[str]:
+    """Removes the resources of a bench that no controller runs any more (IMPLEMENTATION
+    §10; task D3). The logs and records of its containers are kept in `evidence` first,
+    when there is one. A container that cannot be read is skipped, and nothing that is
+    not labelled for the owner is touched. Returns the names of what was removed."""
+    if evidence is not None:
+        for resource in await adapter.owned(owner):
+            if resource.kind == "container":
+                await _preserve(adapter, resource, part_of(resource.name), evidence)
+    removed = await adapter.remove_owned(owner)
+    return [resource.name for resource in removed]
+
+
 class _Steps:
     def __init__(self, checkpoint: Checkpoint | None) -> None:
         self._checkpoint = checkpoint

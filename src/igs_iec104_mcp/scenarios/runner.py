@@ -7,9 +7,10 @@ the scenario goes to the run's journal as soon as it is known, so a client can f
 the run before it ends. The status and the times are in the run store, and the inputs
 are in the run's snapshot.
 
-The runs execute as tasks of the server's event loop. A run still going when the server
-stops keeps its status, as a run interrupted by a restart; reconciling those is the task
-of §10 (D3).
+The runs execute as tasks of the server's event loop. A run the store holds as unended
+when the server starts was left by a controller that stopped: `reconcile` marks it
+interrupted, and nothing of it is resumed. Its bench, if the engine still holds one, is
+listed by `recovered` and removed by `remove_recovered` (IMPLEMENTATION.md §10, D3).
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from igs_iec104_mcp.definitions.store import (
     new_run_id,
 )
 from igs_iec104_mcp.docker.adapter import DockerAdapter, DockerError
+from igs_iec104_mcp.docker.bench import recover as recover_bench
 from igs_iec104_mcp.docker.bench import start_bench
+from igs_iec104_mcp.docker.labels import Ownership
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.common import DefinitionError
 from igs_iec104_mcp.models.instance import ResourceLimits
@@ -57,6 +60,10 @@ from igs_iec104_mcp.storage.runs import (
 # The label of the project that owns the containers of a run.
 PROJECT_LABEL = "igs-mcp"
 EVIDENCE = "evidence"
+INTERRUPTED_DETAIL = (
+    "the server stopped during the run: no command was resumed, and the bench is left "
+    "for inspection (bench_recovered)"
+)
 NO_ENGINE = (
     "the server has no runtime image: start it with --runtime-image and --relay-image"
 )
@@ -103,6 +110,10 @@ class Engine(Protocol):
         self, bench: TestBench, run_id: str, evidence: Path
     ) -> BenchHandle: ...
 
+    async def owners(self) -> list[Ownership]: ...
+
+    async def recover(self, owner: Ownership, evidence: Path | None) -> list[str]: ...
+
 
 class DockerEngine:
     """The Docker engine of the runs. A bench starts through the adapter, with the
@@ -141,14 +152,47 @@ class DockerEngine:
             evidence=evidence,
         )
 
+    async def owners(self) -> list[Ownership]:
+        adapter = await self._connect()
+        try:
+            return await adapter.owners(PROJECT_LABEL)
+        except DockerError as error:
+            raise EngineUnavailable(str(error)) from error
+
+    async def recover(self, owner: Ownership, evidence: Path | None) -> list[str]:
+        adapter = await self._connect()
+        try:
+            return await recover_bench(adapter, owner, evidence)
+        except DockerError as error:
+            raise EngineUnavailable(str(error)) from error
+
+    async def _connect(self) -> DockerAdapter:
+        """The adapter, connected to an engine that answers. Recovery needs the engine,
+        and no image."""
+        try:
+            if self._adapter is None:
+                self._adapter = DockerAdapter.connect()
+            await self._adapter.ping()
+        except DockerError as error:
+            self._adapter = None
+            raise EngineUnavailable(str(error)) from error
+        return self._adapter
+
 
 class NoEngine:
-    """The engine of a server started without runtime images: no bench can start."""
+    """The engine of a server started without runtime images: no bench can start, and
+    none is listed or removed."""
 
     async def check(self) -> None:
         raise EngineUnavailable(NO_ENGINE)
 
     async def start(self, bench: TestBench, run_id: str, evidence: Path) -> BenchHandle:
+        raise EngineUnavailable(NO_ENGINE)
+
+    async def owners(self) -> list[Ownership]:
+        raise EngineUnavailable(NO_ENGINE)
+
+    async def recover(self, owner: Ownership, evidence: Path | None) -> list[str]:
         raise EngineUnavailable(NO_ENGINE)
 
 
@@ -206,6 +250,28 @@ class RunOut(BaseModel):
     ended_at_ms: int | None
     events: int
     dropped: int
+
+
+class RecoveredOut(BaseModel):
+    """A bench a controller left on the engine: its run and its bench, and the status of
+    the run when the store knows the run."""
+
+    run: str
+    bench: str
+    status: str | None
+
+
+class RecoveredPage(BaseModel):
+    """The benches that no task of this server runs."""
+
+    benches: list[RecoveredOut]
+
+
+class RemovedOut(BaseModel):
+    """The resources removed from a recovered bench, by name."""
+
+    run: str
+    removed: list[str]
 
 
 class RunsOut(BaseModel):
@@ -283,6 +349,55 @@ class Runner:
             self._runs.record(run_id, "cancel_requested", {})
         return record
 
+    def reconcile(self) -> list[str]:
+        """Marks each run the store holds as unended, and that no task of this server
+        runs, as interrupted. Nothing is resumed: no command is sent again, and the
+        bench is left for inspection. Returns the identities of the runs marked."""
+        interrupted: list[str] = []
+        with _failures():
+            for record in self._runs.unended():
+                if record.id in self._running:
+                    continue
+                if record.status is RunStatus.PENDING:
+                    self._runs.move(record.id, RunStatus.RUNNING)
+                self._runs.record(
+                    record.id, "interrupted", {"detail": INTERRUPTED_DETAIL}
+                )
+                self._runs.move(record.id, RunStatus.INTERRUPTED, ended_at_ms=_now_ms())
+                interrupted.append(record.id)
+        return interrupted
+
+    async def recovered(self) -> RecoveredPage:
+        """The benches on the engine whose run no task of this server runs."""
+        owners = await self._owners()
+        return RecoveredPage(
+            benches=[
+                RecoveredOut(run=o.run, bench=o.bench, status=self._status_of(o.run))
+                for o in owners
+                if o.run not in self._running
+            ]
+        )
+
+    async def remove_recovered(self, run_id: str) -> RemovedOut:
+        """Removes the resources of a recovered bench. The logs of its containers are
+        kept with the run's evidence, when the store knows the run. Refused for a run
+        this server is running."""
+        if run_id in self._running:
+            raise ServiceError(
+                "invalid_state",
+                f"the run {run_id!r} is running on this server: cancel it first",
+            )
+        owner = next((o for o in await self._owners() if o.run == run_id), None)
+        if owner is None:
+            raise ServiceError(
+                "not_found", f"no bench of the run {run_id!r} is on the engine"
+            )
+        try:
+            removed = await self._engine.recover(owner, self._evidence_of(run_id))
+        except EngineUnavailable as error:
+            raise ServiceError("engine_unavailable", str(error)) from error
+        return RemovedOut(run=run_id, removed=removed)
+
     def get(self, run_id: str) -> RunRecord:
         with _failures():
             return self._runs.get(run_id)
@@ -294,6 +409,26 @@ class Runner:
     def events(self, run_id: str, *, limit: int, cursor: str | None) -> EventPage:
         with _failures():
             return self._runs.events(run_id, after=_cursor(cursor), limit=limit)
+
+    async def _owners(self) -> list[Ownership]:
+        try:
+            return await self._engine.owners()
+        except EngineUnavailable as error:
+            raise ServiceError("engine_unavailable", str(error)) from error
+
+    def _status_of(self, run_id: str) -> str | None:
+        try:
+            return str(self._runs.get(run_id).status)
+        except UnknownRun:
+            return None
+
+    def _evidence_of(self, run_id: str) -> Path | None:
+        """The evidence directory of a run the store knows; None otherwise."""
+        try:
+            self._runs.get(run_id)
+        except UnknownRun:
+            return None
+        return self._runs.root / RUNS_DIRECTORY / run_id / EVIDENCE
 
     def _definitions(self, scenario_name: str) -> tuple[Scenario, TestBench]:
         try:

@@ -24,6 +24,8 @@ from igs_iec104_mcp.scenarios.runner import (
     DockerEngine,
     EventsOut,
     NoEngine,
+    RecoveredPage,
+    RemovedOut,
     Runner,
     RunOut,
     RunsOut,
@@ -74,6 +76,11 @@ def create_server(
     else:
         engine = NoEngine()
     runner = Runner(store, runs, engine)
+    interrupted = runner.reconcile()
+    if interrupted:
+        logging.getLogger(NAME).warning(
+            "marked %d run(s) interrupted: %s", len(interrupted), ", ".join(interrupted)
+        )
     server = MCPServer(NAME, instructions=INSTRUCTIONS)
 
     @server.tool(
@@ -204,6 +211,24 @@ def create_server(
     )
     async def run_cancel(run_id: str) -> RunOut:
         return run_out(await _acall(lambda: runner.cancel(run_id)))
+
+    @server.tool(
+        name="bench_recovered",
+        description="List the benches a controller left on the engine: each names its "
+        "run and its bench, and the run's status when it is known. A bench of a run "
+        "this server runs is not listed.",
+    )
+    async def bench_recovered() -> RecoveredPage:
+        return await _acall(lambda: runner.recovered())
+
+    @server.tool(
+        name="bench_recovered_remove",
+        description="Remove the resources of a recovered bench, by its run. The logs "
+        "of its containers are kept with the run's evidence. Refused for a run this "
+        "server is running.",
+    )
+    async def bench_recovered_remove(run_id: str) -> RemovedOut:
+        return await _acall(lambda: runner.remove_recovered(run_id))
 
     @server.tool(
         name="target_validate",

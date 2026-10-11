@@ -741,3 +741,27 @@ test can show it.
 - Why: Docker Desktop is not available on the development machine, and the publication path (the relay on the control
   network, the host port, the advertised endpoint) is the same engine API on both platforms.
 - Not changed: the plan text of X2 still names both platforms. The status line in IMPLEMENTATION.md §4 says what is done.
+
+## D-037: Reconciliation of the runs and recovered benches (D3)
+
+- Date: 2026-10-11 (task D3).
+- Decision: when the server starts, each run the store holds as unended (pending or running) and that no task of the
+  server runs is marked interrupted. Its journal gets an `interrupted` event with the reason, and the run ends with
+  status `interrupted`. A pending run goes through `running` first, as the transitions require. Nothing is resumed: no
+  command is sent again, no bench is started, and no verdict is invented for a step that was in flight.
+- Benches: the Docker engine lists the benches it holds for the project, from the labels of its resources (one owner per
+  run and bench). `bench_recovered` lists those whose run this server does not run, with the status of the run when the
+  store knows it. `bench_recovered_remove` removes one bench by its run: the logs and records of its containers are
+  kept in the run's evidence, then its owned resources are removed. A run this server runs is refused (`invalid_state`),
+  and a run without a bench on the engine is `not_found`.
+- Removal is explicit. Nothing is removed at startup, so a bench stays available for inspection until someone asks.
+- Engine: the listing and removal need the engine, not the images, so they work on a server started with images and
+  refuse with `engine_unavailable` on a server started without them.
+- Tool names: `bench_recovered` and `bench_recovered_remove`. §9 names `bench_destroy` for managed benches; it was not
+  reused, since the recovered bench is one this server does not manage.
+- Not in D3: the restart of an interrupted run (a new run is started instead); the removal of benches at startup; the
+  outcome of a command that was in flight when the controller stopped, which is unknown and is not reported as a
+  verdict.
+- Tests: `tests/unit/test_run_reconcile.py` (9 tests, with the fake engine of M2); `tests/integration/test_docker_reconcile.py`,
+  where a controller process is killed (SIGKILL) after its first step, a new controller marks the run interrupted, lists
+  the bench, removes it with its logs kept in the evidence, and finds no owned resource left.

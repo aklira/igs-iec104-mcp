@@ -463,6 +463,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: D2, R1.
 - Produce: startup reconciliation of stored state with labeled resources; inspection and explicit cleanup of recovered test benches.
 - Done when: a controller killed during a run restarts, marks the run interrupted, keeps its evidence, and does not resume commands.
+- Done (D-037): the start marks the unended runs interrupted and sends nothing; `bench_recovered` lists the benches a controller left, and `bench_recovered_remove` removes one with its logs kept in the evidence.
 
 **S4 — Runtime point kinds** (added after D2, D-019)
 - Depends: C2, C3.
@@ -607,7 +608,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | D2 Test bench lifecycle | [x] |
 | S4 Runtime point kinds | [x] |
 | S5 Runtime link flags | [x] |
-| D3 Reconciliation | [ ] |
+| D3 Reconciliation | [x] |
 | E1 Steps, cursors, run state machine | [x] |
 | E2 Assertions | [x] |
 | E2b Runtime-backed observation source | [x] |

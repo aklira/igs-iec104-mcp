@@ -144,6 +144,12 @@ class FakeEngine:
         self.handles.append(handle)
         return handle
 
+    async def owners(self) -> list[Any]:
+        return []
+
+    async def recover(self, owner: Any, evidence: Any) -> list[str]:
+        return []
+
 
 def project(tmp_path: Path, bench: str = BENCH) -> tuple[ProjectStore, RunStore]:
     store = ProjectStore(tmp_path)

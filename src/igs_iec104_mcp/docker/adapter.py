@@ -22,7 +22,16 @@ from docker.errors import APIError, DockerException, NotFound
 
 # The SDK ships no type hints (see pyproject.toml): its client is typed Any here.
 from docker import from_env  # type: ignore[attr-defined]
-from igs_iec104_mcp.docker.labels import INSTANCE, Ownership, owns
+from igs_iec104_mcp.docker.labels import (
+    BENCH,
+    INSTANCE,
+    MANAGED,
+    PROJECT,
+    RUN,
+    Ownership,
+    OwnershipError,
+    owns,
+)
 from igs_iec104_mcp.docker.specs import (
     CONTROL_PORT,
     IMAGE_PATTERN,
@@ -136,6 +145,11 @@ class DockerAdapter:
         """Removes the containers, then the networks, of the owner. Nothing that is not
         labelled for the owner is touched. Returns what was removed."""
         return await self._call(lambda: self._remove_owned(ownership))
+
+    async def owners(self, project: str) -> list[Ownership]:
+        """The owners of the labelled resources of a project, one per run and bench, as
+        the labels name them. A resource whose labels name no valid owner is skipped."""
+        return await self._call(lambda: self._owners(project))
 
     @asynccontextmanager
     async def creating(self, ownership: Ownership) -> AsyncIterator[Creation]:
@@ -332,6 +346,27 @@ class DockerAdapter:
                     Resource("container", str(container.id), str(container.name))
                 )
         return found
+
+    def _owners(self, project: str) -> list[Ownership]:
+        selector = {"label": [f"{MANAGED}=true", f"{PROJECT}={project}"]}
+        labelled: list[dict[str, str]] = [
+            network.attrs.get("Labels") or {}
+            for network in self._client.networks.list(filters=selector)
+        ]
+        labelled += [
+            _container_labels(container)
+            for container in self._client.containers.list(all=True, filters=selector)
+        ]
+        owners: dict[tuple[str, str], Ownership] = {}
+        for labels in labelled:
+            bench, run = labels.get(BENCH), labels.get(RUN)
+            if bench is None or run is None:
+                continue
+            try:
+                owners[(run, bench)] = Ownership(project=project, bench=bench, run=run)
+            except OwnershipError:
+                continue
+        return [owners[key] for key in sorted(owners)]
 
     def _remove_owned(self, ownership: Ownership) -> list[Resource]:
         removed: list[Resource] = []
