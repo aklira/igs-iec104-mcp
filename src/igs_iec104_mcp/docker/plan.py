@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass
 
 from igs_iec104_mcp.docker.specs import (
+    CONTROL_NETWORK,
     CONTROL_PORT,
     RUN_DIRECTORY,
     Limits,
@@ -36,6 +37,8 @@ RUNTIME_PARAMETERS = LinkParameters()
 POINTS_FILE = "points.json"
 TOKEN_FILE = "control-token"
 MIB = 1024 * 1024
+# A relay only copies bytes: a small limit is enough for it.
+RELAY_LIMITS = Limits(cpus=0.25, memory_bytes=64 * MIB, pids=32)
 
 
 class PlanError(Exception):
@@ -101,6 +104,12 @@ def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
     )
 
 
+def relay_arguments(target: str) -> tuple[str, ...]:
+    """The arguments of a relay: it listens on the control port and forwards to the
+    runtime's control API at `target` (`address:port`)."""
+    return ("--listen", f"0.0.0.0:{CONTROL_PORT}", "--target", target)
+
+
 def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
     """The runtime's arguments as a client of the station at `connect`
     (`address:port`)."""
@@ -121,6 +130,11 @@ def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
 def plan_bench(bench: TestBench) -> BenchPlan:
     """The plan of a bench. Raises PlanError with every problem, not only the first."""
     issues: list[str] = []
+    if any(network.name == CONTROL_NETWORK for network in bench.networks):
+        issues.append(
+            f"a network is named {CONTROL_NETWORK!r}, which the controller "
+            "reserves for its relays: rename it"
+        )
     instances = {instance.name: instance for instance in bench.instances}
     external = {target.name for target in bench.external_targets}
     server_of: dict[str, str] = {}

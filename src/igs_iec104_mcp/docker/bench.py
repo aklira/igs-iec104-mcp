@@ -2,16 +2,16 @@
 then the stations, then the clients; readiness of each; the addresses the runtimes bind;
 a graceful stop with a deadline; the evidence kept; and the rollback of a partial start.
 
-The controller reaches each runtime's control API through the port the engine publishes
-on
-127.0.0.1. A client is given its station's address, the station's container address on
-their network and the port the station bound, both read from the engine and the
-station's
-readiness: the runtime takes IP addresses, not container names.
+A runtime stays on its bench network, which is internal, and publishes no port. Its
+control API is reached through a relay: a small container on the control network, the
+only network the host can reach, which forwards to the runtime's control port (D-018). A
+client is given its station's address: the station's address on their network and the
+port the station bound, both read from the engine and from the station's readiness. The
+runtime takes IP addresses, not container names.
 
 A failure at any step rolls back what the start created, and the evidence of the
 containers that ran is kept before they are removed. The control token and the points
-are copied into the containers and never written to the evidence."""
+are copied into the runtimes and never written to the evidence."""
 
 from __future__ import annotations
 
@@ -29,14 +29,17 @@ from igs_iec104_mcp.docker.adapter import Creation, DockerAdapter, DockerError, 
 from igs_iec104_mcp.docker.labels import Ownership
 from igs_iec104_mcp.docker.plan import (
     POINTS_FILE,
+    RELAY_LIMITS,
     TOKEN_FILE,
     BenchPlan,
     PlannedRuntime,
     client_arguments,
     plan_bench,
+    relay_arguments,
     server_arguments,
 )
 from igs_iec104_mcp.docker.specs import (
+    CONTROL_NETWORK,
     CONTROL_PORT,
     ContainerSpec,
     NetworkSpec,
@@ -61,11 +64,13 @@ class BenchError(DockerError):
 
 @dataclass(frozen=True)
 class Member:
-    """A runtime of a running bench: its plan, its container, its control address on the
-    host, and the address its station bound (None for a client)."""
+    """A runtime of a running bench: its plan, its container, its relay, the control
+    address the host reaches through the relay, and the address its station bound (None
+    for a client)."""
 
     runtime: PlannedRuntime
     resource: Resource
+    relay: Resource
     control: str
     listen: str | None
 
@@ -73,8 +78,7 @@ class Member:
 @dataclass(frozen=True)
 class StopReport:
     """How each runtime ended, and how many resources were removed. A runtime that
-    exited
-    with status 0 after SIGTERM stopped gracefully."""
+    exited with status 0 after SIGTERM stopped gracefully."""
 
     exit_codes: dict[str, int | None]
     removed: int
@@ -97,25 +101,24 @@ class RunningBench:
     _adapter: DockerAdapter = field(repr=False)
 
     def client(self, instance: str) -> ControlClient:
-        """A control client for one runtime. The caller closes it."""
+        """A control client for one runtime, through its relay. The caller closes it."""
         return ControlClient(self.members[instance].control, self.token)
 
     async def stop(self, grace: int = 10) -> StopReport:
         """Stops the clients, then the stations, with SIGTERM and a deadline of `grace`
-        seconds. Each runtime's logs and record are kept before its resources are
-        removed.
-        The owner's resources are removed even when a stop fails."""
+        seconds. Each runtime's logs and record, and its relay's, are kept before the
+        owner's resources are removed, even when a stop fails."""
         order = [m for m in self.members.values() if m.runtime.role == "client"]
         order += [m for m in self.members.values() if m.runtime.role == "server"]
         exit_codes: dict[str, int | None] = {}
         try:
             for member in order:
+                name = member.runtime.name
                 await self._adapter.stop_container(member.resource, grace)
-                exit_codes[member.runtime.name] = await _exit_code(
-                    self._adapter, member.resource
-                )
+                exit_codes[name] = await _exit_code(self._adapter, member.resource)
+                await _preserve(self._adapter, member.resource, name, self.evidence)
                 await _preserve(
-                    self._adapter, member.resource, member.runtime.name, self.evidence
+                    self._adapter, member.relay, f"relay-{name}", self.evidence
                 )
         finally:
             removed = await self._adapter.remove_owned(self.ownership)
@@ -138,20 +141,25 @@ async def start_bench(
     project: str,
     run: str,
     image: str,
+    relay: str,
     evidence: Path,
     ready_timeout: float = 30.0,
     checkpoint: Checkpoint | None = None,
 ) -> RunningBench:
     """Starts a bench: the networks, then each station and its readiness, then each
-    client, connected to its station. The plan is checked first. A failure rolls back
-    what was created, after the evidence of the runtimes that ran is kept."""
+    client,
+    connected to its station. The plan is checked first. A failure rolls back what was
+    created, after the evidence of the containers that ran is kept.
+
+    `image` is the runtime image and `relay` the relay image, each by digest or
+    identity."""
     plan = plan_bench(bench)
     ownership = Ownership(project=project, bench=bench.name, run=run)
     evidence.mkdir(parents=True, exist_ok=True)
     steps = _Steps(checkpoint)
     await steps("image")
     image_id = await adapter.image_id(image)
-    evidence.mkdir(parents=True, exist_ok=True)
+    relay_id = await adapter.image_id(relay)
     _write_json(
         evidence / "manifest.json",
         {
@@ -159,6 +167,8 @@ async def start_bench(
             "run": run,
             "image": image,
             "image_id": image_id,
+            "relay": relay,
+            "relay_id": relay_id,
             "networks": [network.name for network in plan.networks],
             "runtimes": [runtime.name for runtime in (*plan.servers, *plan.clients)],
         },
@@ -174,6 +184,7 @@ async def start_bench(
                     ownership,
                     creation,
                     image_id=image_id,
+                    relay_id=relay_id,
                     token=token,
                     steps=steps,
                     ready_timeout=ready_timeout,
@@ -206,6 +217,7 @@ async def _bring_up(
     creation: Creation,
     *,
     image_id: str,
+    relay_id: str,
     token: str,
     steps: _Steps,
     ready_timeout: float,
@@ -213,12 +225,16 @@ async def _bring_up(
     for network in plan.networks:
         await steps(f"network:{network.name}")
         await creation.network(NetworkSpec(network.name, internal=not network.external))
+    await steps(f"network:{CONTROL_NETWORK}")
+    await creation.network(NetworkSpec(CONTROL_NETWORK, internal=False))
     members: dict[str, Member] = {}
     for server in plan.servers:
         members[server.name] = await _launch(
             adapter,
             creation,
+            ownership,
             image_id=image_id,
+            relay_id=relay_id,
             runtime=server,
             token=token,
             steps=steps,
@@ -231,7 +247,9 @@ async def _bring_up(
         members[client.name] = await _launch(
             adapter,
             creation,
+            ownership,
             image_id=image_id,
+            relay_id=relay_id,
             runtime=client,
             token=token,
             steps=steps,
@@ -244,14 +262,19 @@ async def _bring_up(
 async def _launch(
     adapter: DockerAdapter,
     creation: Creation,
+    ownership: Ownership,
     *,
     image_id: str,
+    relay_id: str,
     runtime: PlannedRuntime,
     token: str,
     steps: _Steps,
     ready_timeout: float,
     connect: str | None,
 ) -> Member:
+    """A runtime and its relay: the runtime starts on its network, then the relay is
+    created on the control network (where the engine publishes its port) and joined to
+    the runtime's network, and then the runtime is reached through it."""
     name = runtime.name
     await steps(f"create:{name}")
     arguments = (
@@ -274,7 +297,23 @@ async def _launch(
     )
     await steps(f"start:{name}")
     await adapter.start_container(resource)
-    control = await _control_address(adapter, resource)
+    ip = await _address_on(adapter, resource, ownership, runtime.network)
+    await steps(f"relay:{name}")
+    relay = await creation.container(
+        ContainerSpec(
+            instance=f"relay-{name}",
+            image=relay_id,
+            network=CONTROL_NETWORK,
+            limits=RELAY_LIMITS,
+            arguments=relay_arguments(f"{ip}:{CONTROL_PORT}"),
+            publish_control=True,
+        )
+    )
+    await adapter.connect_network(
+        relay, resource_name(ownership, runtime.network), ownership
+    )
+    await adapter.start_container(relay)
+    control = await _control_address(adapter, relay)
     await steps(f"ready:{name}")
     body = await _await(
         adapter, resource, control, token, ready_timeout, lambda body: body["ready"]
@@ -292,18 +331,40 @@ async def _launch(
             ready_timeout,
             lambda body: body.get("connection") == "up",
         )
-    return Member(runtime=runtime, resource=resource, control=control, listen=listen)
+    return Member(
+        runtime=runtime,
+        resource=resource,
+        relay=relay,
+        control=control,
+        listen=listen,
+    )
 
 
-async def _control_address(adapter: DockerAdapter, resource: Resource) -> str:
-    """The host address of a runtime's control API, as the engine published it."""
-    attrs = await adapter.inspect(resource)
+async def _control_address(adapter: DockerAdapter, relay: Resource) -> str:
+    """The host address of a relay, as the engine published it on 127.0.0.1."""
+    attrs = await adapter.inspect(relay)
     bindings = (attrs.get("NetworkSettings", {}).get("Ports") or {}).get(
         f"{CONTROL_PORT}/tcp"
     )
     if not bindings:
-        raise BenchError(f"{resource.name} has no published control port")
+        raise BenchError(f"{relay.name} has no published control port")
     return f"127.0.0.1:{bindings[0]['HostPort']}"
+
+
+async def _address_on(
+    adapter: DockerAdapter,
+    resource: Resource,
+    ownership: Ownership,
+    network: str,
+) -> str:
+    """The container address of a runtime on one of the bench's networks."""
+    attrs = await adapter.inspect(resource)
+    networks = attrs.get("NetworkSettings", {}).get("Networks") or {}
+    entry = networks.get(resource_name(ownership, network)) or {}
+    address = entry.get("IPAddress")
+    if not address:
+        raise BenchError(f"{resource.name} has no address on {network!r}")
+    return str(address)
 
 
 async def _station_address(
@@ -312,16 +373,11 @@ async def _station_address(
     ownership: Ownership,
     network: str,
 ) -> str:
-    """The address a client connects to: the station's address on their network, and the
-    port the station bound."""
+    """The address a client connects to: the station's address on the client's network,
+    and the port the station bound."""
     if station.listen is None:
         raise BenchError(f"{station.runtime.name} reports no listening address")
-    attrs = await adapter.inspect(station.resource)
-    networks = attrs.get("NetworkSettings", {}).get("Networks") or {}
-    entry = networks.get(resource_name(ownership, network)) or {}
-    address = entry.get("IPAddress")
-    if not address:
-        raise BenchError(f"{station.runtime.name} has no address on {network!r}")
+    address = await _address_on(adapter, station.resource, ownership, network)
     port = station.listen.rsplit(":", 1)[1]
     return f"{address}:{port}"
 
@@ -334,8 +390,9 @@ async def _await(
     timeout: float,
     done: Callable[[dict[str, Any]], bool],
 ) -> dict[str, Any]:
-    """Polls a runtime's readiness until `done` accepts it. Raises BenchError when the
-    container stops, or when the time runs out, with what the runtime last reported."""
+    """Polls a runtime's readiness, through its relay, until `done` accepts it. Raises
+    BenchError when the runtime stops, or when the time runs out, with what the runtime
+    last reported."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     client = ControlClient(control, token)
@@ -368,8 +425,8 @@ async def _await(
 async def _preserve_created(
     adapter: DockerAdapter, created: list[Resource], evidence: Path
 ) -> None:
-    """Keeps the logs and the record of each container a failed start created, before
-    the rollback removes them. A container that cannot be read is skipped."""
+    """Keeps the logs and the record of each container that a failed start created,
+    before the rollback removes them. A container that cannot be read is skipped."""
     for resource in created:
         if resource.kind == "container":
             await _preserve(adapter, resource, part_of(resource.name), evidence)

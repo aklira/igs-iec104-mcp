@@ -183,6 +183,21 @@ class DockerAdapter:
                 raise DockerError(f"{name!r} is not a plain file name")
         await self._call(partial(self._put_files, resource, files))
 
+    async def connect_network(
+        self, resource: Resource, network: str, ownership: Ownership
+    ) -> None:
+        """Joins a created container to a second network of the owner. The network must
+        be the owner's, by its labels."""
+        await self._call(partial(self._connect_network, resource, network, ownership))
+
+    def _connect_network(
+        self, resource: Resource, network: str, ownership: Ownership
+    ) -> None:
+        found = self._client.networks.get(network)
+        if not owns(found.attrs.get("Labels"), ownership):
+            raise Conflict(f"network {network!r} is not this run's: refused")
+        found.connect(self._container(resource))
+
     async def start_container(self, resource: Resource) -> None:
         await self._call(self._container(resource).start)
 
@@ -288,7 +303,11 @@ class DockerAdapter:
             mem_limit=spec.limits.memory_bytes,
             nano_cpus=round(spec.limits.cpus * 1_000_000_000),
             pids_limit=spec.limits.pids,
-            ports={f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)},
+            ports=(
+                {f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)}
+                if spec.publish_control
+                else {}
+            ),
         )
         return Resource("container", str(container.id), name), True
 

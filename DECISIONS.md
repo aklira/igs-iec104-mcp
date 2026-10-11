@@ -314,3 +314,31 @@ test can show it.
   runtime's non-root user, no privilege, all capabilities dropped, `no-new-privileges`, the resource limits,
   and no bind, volume, or socket. A read-only root with the files in a volume is a later option, to check on
   Docker before it is used.
+
+## D-018: Reaching the runtimes from the host through relays
+
+- Date: 2026-10-11 (task D2, after the CI run of 72daafc).
+- Problem: the engine does not publish a port of a container that is on an internal network (the bench
+  network, D-015). The first design published each runtime's control port there, so the controller could not
+  reach any runtime. A bench network must stay internal (§6), so the publication moves elsewhere.
+- Decision: each runtime keeps its bench network, which is internal, and publishes no port. For each runtime,
+  a relay container (`docker/relay.py`, image `docker/relay.Dockerfile`) is created on the bench's control
+  network, which is not internal and is the only network the host reaches. The relay publishes the control
+  port on 127.0.0.1 at a port the engine picks, and forwards every connection, byte for byte, to the runtime's
+  control port on its bench network. The relay is then joined to the runtime's bench network. Only relays are
+  on the control network.
+- Order: the runtime starts first, so its address on its network is known; then the relay is created with that
+  address as its target; then the relay is started and read back; then the runtime is polled through it.
+- Limits and privilege: the relay holds no protocol logic and no token. It is a Python script, with the
+  standard library only, under the same restrictions as a runtime (non-root user 10002, no privilege, all
+  capabilities dropped, `no-new-privileges`) and small limits (0.25 CPU, 64 MiB, 32 processes). A relay can
+  reach the outside through the control network: that is the egress this design accepts. Restricting it is
+  left for the external-connectivity work (X1), where the plan asks for egress restrictions.
+- The name `control` is reserved for the control network; a bench that names a network so is refused by the
+  plan.
+- Corrections to D-016: the runtime's control port is no longer published by the runtime; the controller reads
+  the relay's published port. The runtime's root filesystem is writable (see D-015).
+- Tests: `tests/unit/test_relay.py` (the address parsing and the forwarding of bytes both ways, and a refused
+  target closes the client); `tests/integration/test_docker_bench.py` (a runtime publishes no port; the relay
+  does; the stop keeps the relay's logs). The integration tests need `IGS_RELAY_IMAGE` as well as
+  `IGS_RUNTIME_IMAGE`; the CI integration job builds both.

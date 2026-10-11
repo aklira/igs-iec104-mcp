@@ -29,6 +29,9 @@ MIN_PIDS = 16
 # The runtime's control API listens on this port inside its container. The engine
 # publishes it on 127.0.0.1 at a port it picks, which the controller reads back (D2).
 CONTROL_PORT = 8080
+# The network of a bench that the host can reach through its relays. It is not internal:
+# a published port needs a network with a route. Only the relays are on it (§6, D-018).
+CONTROL_NETWORK = "control"
 # The directory of the runtime's files (its control token and its points). The image
 # creates it, owned by the runtime's user; the files are copied in before the container
 # starts, so no mount is used: a mount made at start would hide the copied files.
@@ -84,13 +87,14 @@ class NetworkSpec:
 class ContainerSpec:
     """A runtime container: its instance, its image, its network (by name in the
     bench), its limits, and the arguments of the runtime. It has no bind mount, no
-    privilege, and no port but the control port."""
+    privilege, and no port, unless `publish_control` is set (a relay's port)"""
 
     instance: str
     image: str
     network: str
     limits: Limits = field(default_factory=Limits)
     arguments: tuple[str, ...] = ()
+    publish_control: bool = False
 
     def __post_init__(self) -> None:
         check_plain_name(self.instance, "instance")

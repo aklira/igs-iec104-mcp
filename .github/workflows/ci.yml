@@ -121,10 +121,12 @@ jobs:
       - name: Install the locked environment
         run: uv sync --locked
 
-      - name: Build the runtime image for the Docker tests
+      - name: Build the runtime and relay images for the Docker tests
         run: |
           docker build --file docker/runtime.Dockerfile --tag igs-iec104-runtime:ci runtime
           echo "IGS_RUNTIME_IMAGE=$(docker image inspect --format '{{.Id}}' igs-iec104-runtime:ci)" >> "$GITHUB_ENV"
+          docker build --file docker/relay.Dockerfile --tag igs-iec104-relay:ci docker
+          echo "IGS_RELAY_IMAGE=$(docker image inspect --format '{{.Id}}' igs-iec104-relay:ci)" >> "$GITHUB_ENV"
 
       - name: Run the integration tests
         env:

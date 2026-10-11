@@ -15,6 +15,7 @@ from igs_iec104_mcp.docker.plan import (
     PlanError,
     client_arguments,
     plan_bench,
+    relay_arguments,
     runtime_path,
     server_arguments,
 )
@@ -158,3 +159,19 @@ def test_the_runtime_limits_that_it_cannot_take_are_refused() -> None:
     (issue,) = refused(data)
     assert "client-1" in issue
     assert "pids" in issue
+
+
+def test_a_relay_listens_on_the_control_port_and_forwards_to_the_runtime() -> None:
+    assert relay_arguments("172.20.0.5:8080") == (
+        "--listen",
+        "0.0.0.0:8080",
+        "--target",
+        "172.20.0.5:8080",
+    )
+
+
+def test_the_name_of_the_control_network_is_reserved() -> None:
+    data = copy.deepcopy(BENCH)
+    data["networks"].append({"name": "control"})
+    (issue,) = refused(data)
+    assert "reserves" in issue

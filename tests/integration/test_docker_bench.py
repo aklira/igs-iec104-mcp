@@ -50,6 +50,22 @@ def runtime_image() -> str:
 
 
 @pytest.fixture
+def relay_image() -> str:
+    """The identity of the relay image named by IGS_RELAY_IMAGE."""
+    reference = os.environ.get("IGS_RELAY_IMAGE")
+    message = "set IGS_RELAY_IMAGE to the relay image (docker/relay.Dockerfile)"
+    if not reference:
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        pytest.skip(message)
+    try:
+        identity: str = from_env().images.get(reference).id
+    except NotFound:
+        pytest.fail(f"no image {reference!r} on the engine: {message}")
+    return identity
+
+
+@pytest.fixture
 def bench_run_dir(tmp_path: Path) -> Path:
     return tmp_path / "runs"
 
@@ -76,7 +92,7 @@ async def connected(running: RunningBench, instance: str) -> dict[str, Any]:
 
 
 async def test_the_basic_pair_comes_up_and_stops_with_its_evidence(
-    adapter: DockerAdapter, runtime_image: str, bench_run_dir: Path
+    adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
 ) -> None:
     run = new_ownership()
     evidence = bench_run_dir / run.run
@@ -86,6 +102,7 @@ async def test_the_basic_pair_comes_up_and_stops_with_its_evidence(
         project=PROJECT,
         run=run.run,
         image=runtime_image,
+        relay=relay_image,
         evidence=evidence,
     )
     try:
@@ -94,16 +111,20 @@ async def test_the_basic_pair_comes_up_and_stops_with_its_evidence(
         assert station["listen_address"] == running.members["server-1"].listen
         assert station["listen_address"].startswith("0.0.0.0:")
         assert client["connection"] == "up"
-        assert len(await adapter.owned(run)) == 3
+        assert running.members["server-1"].control.startswith("127.0.0.1:")
+        runtime = await adapter.inspect(running.members["server-1"].resource)
+        published = runtime["NetworkSettings"].get("Ports") or {}
+        assert not any(published.values()), "a runtime publishes no port"
+        assert len(await adapter.owned(run)) == 6
     finally:
         report = await running.stop(grace=10)
 
     assert report.graceful, report.exit_codes
     assert report.exit_codes == {"client-1": 0, "server-1": 0}
-    assert report.removed == 3
+    assert report.removed == 6
     assert await adapter.owned(run) == []
     kept = {path.name for path in evidence.iterdir()}
-    assert {"server-1.log", "client-1.log", "server-1.json", "stop.json"} <= kept
+    assert {"server-1.log", "client-1.log", "relay-server-1.log", "stop.json"} <= kept
     for path in evidence.iterdir():
         assert running.token not in path.read_text(
             encoding="utf-8", errors="replace"
@@ -111,7 +132,7 @@ async def test_the_basic_pair_comes_up_and_stops_with_its_evidence(
 
 
 async def test_a_failure_at_each_step_leaves_no_owned_resource(
-    adapter: DockerAdapter, runtime_image: str, bench_run_dir: Path
+    adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
 ) -> None:
     steps: list[str] = []
 
@@ -125,6 +146,7 @@ async def test_a_failure_at_each_step_leaves_no_owned_resource(
         project=PROJECT,
         run=first.run,
         image=runtime_image,
+        relay=relay_image,
         evidence=bench_run_dir / first.run,
         checkpoint=record,
     )
@@ -132,11 +154,14 @@ async def test_a_failure_at_each_step_leaves_no_owned_resource(
     assert steps == [
         "image",
         "network:lan",
+        "network:control",
         "create:server-1",
         "start:server-1",
+        "relay:server-1",
         "ready:server-1",
         "create:client-1",
         "start:client-1",
+        "relay:client-1",
         "ready:client-1",
         "connect:client-1",
     ]
@@ -156,6 +181,7 @@ async def test_a_failure_at_each_step_leaves_no_owned_resource(
                 project=PROJECT,
                 run=run.run,
                 image=runtime_image,
+                relay=relay_image,
                 evidence=evidence,
                 checkpoint=fail,
             )
@@ -165,7 +191,7 @@ async def test_a_failure_at_each_step_leaves_no_owned_resource(
 
 
 async def test_two_benches_run_side_by_side(
-    adapter: DockerAdapter, runtime_image: str, bench_run_dir: Path
+    adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
 ) -> None:
     first, second = new_ownership(), new_ownership()
     bench = basic_pair()
@@ -176,6 +202,7 @@ async def test_two_benches_run_side_by_side(
             project=PROJECT,
             run=first.run,
             image=runtime_image,
+            relay=relay_image,
             evidence=bench_run_dir / first.run,
         ),
         start_bench(
@@ -184,6 +211,7 @@ async def test_two_benches_run_side_by_side(
             project=PROJECT,
             run=second.run,
             image=runtime_image,
+            relay=relay_image,
             evidence=bench_run_dir / second.run,
         ),
     )
@@ -197,14 +225,14 @@ async def test_two_benches_run_side_by_side(
     finally:
         await one.stop(grace=10)
         assert await adapter.owned(first) == []
-        assert len(await adapter.owned(second)) == 3
+        assert len(await adapter.owned(second)) == 6
         assert (await connected(two, "client-1"))["connection"] == "up"
         await two.stop(grace=10)
     assert await adapter.owned(second) == []
 
 
 async def test_a_bench_that_does_not_plan_creates_nothing(
-    adapter: DockerAdapter, runtime_image: str, bench_run_dir: Path
+    adapter: DockerAdapter, runtime_image: str, relay_image: str, bench_run_dir: Path
 ) -> None:
     data = basic_pair_data()
     next(item for item in data["instances"] if item["name"] == "client-1")[
@@ -218,6 +246,7 @@ async def test_a_bench_that_does_not_plan_creates_nothing(
             project=PROJECT,
             run=run.run,
             image=runtime_image,
+            relay=relay_image,
             evidence=bench_run_dir / run.run,
         )
     assert await adapter.owned(run) == []
