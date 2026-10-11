@@ -467,7 +467,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 **S4 — Runtime point kinds** (added after D2, D-019)
 - Depends: C2, C3.
 - Produce: the runtime serves `counter`, `step`, `bitstring`, `packed`, and `normalized_unqualified` points, on the station and in the client's point image, with their time tags where the form has one.
-- Split (§2, D-021): S4a `counter` (a station serves it; its update reaches the client as M_IT; the contract is 1.3.0); S4b the counter interrogation as a client action; S4c `step` and `bitstring`; S4d `packed` and `normalized_unqualified`.
+- Split (§2, D-021): S4a `counter` (a station serves it; its update reaches the client as M_IT; the contract is 1.3.0), done; S4b the counter interrogation as a client action (D-022, contract 1.4.0), done; S4c `step` and `bitstring`; S4d `packed` and `normalized_unqualified`.
 - Done when: for each kind, a station serves it, a client receives it with its value and quality, and the plan accepts a bench that uses it.
 
 **S5 — Runtime link flags** (added after D2, D-020)

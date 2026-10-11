@@ -41,6 +41,12 @@ class ControlClient:
     async def general_interrogation(self) -> dict[str, Any]:
         return await self._call("POST", "/v1/interrogation/general")
 
+    async def counter_interrogation(self, group: int = 0) -> dict[str, Any]:
+        """A counter interrogation: 0 for every counter, or the group 1 to 4 (S4b)."""
+        return await self._call(
+            "POST", "/v1/interrogation/counter", json={"group": group}
+        )
+
     async def events(self, after: int = 0) -> dict[str, Any]:
         return await self._call("GET", "/v1/events", params={"after": after})
 

@@ -38,6 +38,7 @@ pub fn router(shared: Arc<Shared>) -> Router {
         .route("/v1/ready", get(ready))
         .route("/v1/transfer/start", post(start_transfer))
         .route("/v1/interrogation/general", post(general_interrogation))
+        .route("/v1/interrogation/counter", post(counter_interrogation))
         .route("/v1/commands/single", post(single_command))
         .route("/v1/requests/{id}", get(get_request))
         .route("/v1/requests/{id}/cancel", post(cancel_request))
@@ -137,6 +138,31 @@ async fn start_transfer(State(shared): State<Arc<Shared>>) -> Response {
     };
     match ask(client, ClientRequest::StartTransfer).await {
         Ok(()) => accepted(StatusCode::ACCEPTED, None, None),
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// The body of a counter interrogation: 0 for every counter (the default), or a group of 1 to 4.
+#[derive(Deserialize)]
+struct CounterBody {
+    #[serde(default)]
+    group: u8,
+}
+
+async fn counter_interrogation(
+    State(shared): State<Arc<Shared>>,
+    Json(body): Json<CounterBody>,
+) -> Response {
+    let Some(client) = &shared.client else {
+        return wrong_role("client");
+    };
+    match ask(client, |reply| ClientRequest::CounterInterrogate {
+        group: body.group,
+        reply,
+    })
+    .await
+    {
+        Ok(id) => accepted(StatusCode::ACCEPTED, Some(id), None),
         Err(refusal) => refused(refusal),
     }
 }

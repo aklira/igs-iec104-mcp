@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use common::{get, has_event, post, send, wait_for, TokenFile};
 use igs_iec104::process_image::PointValue;
 use igs_iec104::server::{Handler, Operation, Refusal, Server, ServerConfig};
-use igs_iec104_codec::elements::{QualityFlags, Siq};
+use igs_iec104_codec::elements::{Bcr, QualityFlags, Siq};
 use igs_iec104_codec::header::{CommonAddress, InformationObjectAddress};
 use igs_iec104_runtime::config::{Config, Role, DEFAULT_CONTROL, DEFAULT_EVENT_CAPACITY};
 use igs_iec104_runtime::runtime::Runtime;
@@ -45,6 +45,12 @@ async fn station() -> SocketAddr {
         .handle()
         .add_point(status, on, false)
         .expect("the point is added");
+    let counter = InformationObjectAddress::new(2).expect("an address in range");
+    let reading = PointValue::Counter(Bcr::new(42, 0).expect("a counter"));
+    server
+        .handle()
+        .add_point(counter, reading, false)
+        .expect("the counter is added");
     tokio::spawn(server.run());
     address
 }
@@ -158,6 +164,88 @@ async fn a_request_made_without_a_connection_is_reported_as_discarded() {
 
     let (status, _) = post(control, "/v1/points/1", &serde_json::json!({"value": true})).await;
     assert_eq!(status, 409, "a client does not serve points");
+
+    let _ = stop.send(());
+    serving
+        .await
+        .expect("the runtime task ends")
+        .expect("the control API stops without an error");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_counter_interrogation_brings_the_counters_into_the_image() {
+    let token = TokenFile::new("s4b-counter");
+    let runtime = Runtime::bind(config(station().await, &token))
+        .await
+        .expect("the runtime binds");
+    let control = runtime.control_address();
+    let (stop, stopped) = oneshot::channel::<()>();
+    let serving = tokio::spawn(runtime.serve(async {
+        let _ = stopped.await;
+    }));
+    wait_for(control, "/v1/ready", |body| body["connection"] == "up").await;
+    send(control, "POST", "/v1/transfer/start", None).await;
+    wait_for(control, "/v1/events", |body| {
+        has_event(body, |event| {
+            event["kind"] == "transfer" && event["state"] == "started"
+        })
+    })
+    .await;
+
+    // A group that does not exist is refused by the control API, before anything is sent.
+    let (status, body) = send(
+        control,
+        "POST",
+        "/v1/interrogation/counter",
+        Some(&serde_json::json!({"group": 5})),
+    )
+    .await;
+    assert_eq!(status, 400, "{body}");
+
+    let (status, body) = send(
+        control,
+        "POST",
+        "/v1/interrogation/counter",
+        Some(&serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(status, 202);
+    assert_eq!(body["accepted"], true);
+    let events = wait_for(control, "/v1/events", |body| {
+        has_event(body, |event| {
+            event["kind"] == "asdu"
+                && event["asdu"]["type_id"] == 101
+                && event["asdu"]["cause"] == 10
+        })
+    })
+    .await;
+
+    // The station answers with its counter (M_IT_NA_1, cause 37) and ends the request (cause 10).
+    let asdus: Vec<&serde_json::Value> = events["events"]
+        .as_array()
+        .expect("the events are a list")
+        .iter()
+        .filter(|event| event["kind"] == "asdu")
+        .map(|event| &event["asdu"])
+        .collect();
+    assert!(asdus
+        .iter()
+        .any(|asdu| asdu["type_id"] == 15 && asdu["cause"] == 37));
+
+    let image = wait_for(control, "/v1/image/points", |body| {
+        body["points"]
+            .as_array()
+            .is_some_and(|points| points.iter().any(|point| point["address"] == 2))
+    })
+    .await;
+    let counter = image["points"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|point| point["address"] == 2)
+        .expect("the counter is in the image");
+    assert_eq!(counter["value"], 42);
+    assert_eq!(counter["type_id"], 15);
 
     let _ = stop.send(());
     serving

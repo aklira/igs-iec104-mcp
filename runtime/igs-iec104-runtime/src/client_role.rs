@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use igs_iec104::procedures;
 use igs_iec104::{Client, ClientConfig, Delivery, Event, OfflineRequests};
-use igs_iec104_codec::elements::{Qoc, Qoi, Sco};
+use igs_iec104_codec::asdu::Asdu;
+use igs_iec104_codec::elements::{CounterFreeze, Qcc, Qoc, Qoi, Sco};
 use igs_iec104_codec::header::{CommonAddress, InformationObjectAddress};
 use igs_iec104_link::TransferState;
 use serde::Serialize;
@@ -113,6 +114,13 @@ pub enum Request {
     StartTransfer(oneshot::Sender<Result<(), Refusal>>),
     /// A general interrogation of the station.
     Interrogate(oneshot::Sender<Result<RequestId, Refusal>>),
+    /// A counter interrogation: the general request (`group` 0), or a group of counters (1 to 4).
+    CounterInterrogate {
+        /// 0 for every counter, 1 to 4 for a group.
+        group: u8,
+        /// Answers with the identity of the request, or why it was refused.
+        reply: oneshot::Sender<Result<RequestId, Refusal>>,
+    },
     /// A single command to a point.
     SingleCommand {
         /// The information object address of the command.
@@ -195,6 +203,16 @@ async fn answer(client: &Client, recorder: &Recorder, common: CommonAddress, req
             };
             let _ = reply.send(result);
         }
+        Request::CounterInterrogate { group, reply } => {
+            let result = match counter_interrogation(common, group) {
+                Ok(asdu) => {
+                    let kind = Kind::CounterInterrogation;
+                    submit(client, recorder, kind, asdu, INTERROGATION_TIMEOUT).await
+                }
+                Err(refusal) => Err(refusal),
+            };
+            let _ = reply.send(result);
+        }
         Request::SingleCommand {
             address,
             on,
@@ -210,6 +228,25 @@ async fn answer(client: &Client, recorder: &Recorder, common: CommonAddress, req
             let _ = reply.send(result);
         }
     }
+}
+
+/// The counter interrogation of a group: 0 asks for every counter (the qualifier's general request,
+/// 5), and 1 to 4 for a group. Only the read is asked: freezing and resetting are not requests of the
+/// control API.
+fn counter_interrogation(common: CommonAddress, group: u8) -> Result<Asdu, Refusal> {
+    let request = match group {
+        0 => 5,
+        1..=4 => group,
+        _ => {
+            return Err(Refusal::Invalid(
+                "a counter group is 0 (every counter) or 1 to 4".to_owned(),
+            ))
+        }
+    };
+    let qcc = Qcc::new(request, CounterFreeze::Read)
+        .ok_or_else(|| Refusal::Invalid("the counter request".to_owned()))?;
+    procedures::counter_interrogation(common, qcc)
+        .map_err(|error| Refusal::Invalid(error.to_string()))
 }
 
 async fn single_command(

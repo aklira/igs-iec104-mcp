@@ -45,6 +45,8 @@ pub type RequestId = u64;
 pub enum Kind {
     /// A general interrogation (C_IC_NA_1).
     Interrogation,
+    /// A counter interrogation (C_CI_NA_1): the general request, or a group of counters.
+    CounterInterrogation,
     /// A single command (C_SC_NA_1): a select, or an execution.
     SingleCommand {
         /// True for a select (S/E = 1), false for an execution.
@@ -58,9 +60,9 @@ impl Kind {
     fn completes_at(self) -> u8 {
         match self {
             Self::SingleCommand { select: true } => cause::ACTIVATION_CONFIRMATION,
-            Self::Interrogation | Self::SingleCommand { select: false } => {
-                cause::ACTIVATION_TERMINATION
-            }
+            Self::Interrogation
+            | Self::CounterInterrogation
+            | Self::SingleCommand { select: false } => cause::ACTIVATION_TERMINATION,
         }
     }
 
@@ -68,6 +70,7 @@ impl Kind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Interrogation => "interrogation",
+            Self::CounterInterrogation => "counter_interrogation",
             Self::SingleCommand { select: true } => "single_command_select",
             Self::SingleCommand { select: false } => "single_command_execute",
         }
@@ -461,7 +464,7 @@ impl Correlator {
 mod tests {
     use super::*;
     use igs_iec104::procedures;
-    use igs_iec104_codec::elements::{Qoc, Qoi, Sco};
+    use igs_iec104_codec::elements::{CounterFreeze, Qcc, Qoc, Qoi, Sco};
 
     const STATION: CommonAddress = CommonAddress::new(1);
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -554,6 +557,27 @@ mod tests {
         correlator.connected();
         let asdu = interrogation();
         let id = sent(&mut correlator, Kind::Interrogation, asdu.clone(), now);
+        assert!(correlator
+            .answer(&answer_to(&asdu, cause::ACTIVATION_CONFIRMATION, false))
+            .is_empty());
+        let ended = correlator.answer(&answer_to(&asdu, cause::ACTIVATION_TERMINATION, false));
+        assert_eq!(ended[0].id, id);
+        assert_eq!(ended[0].outcome, Outcome::Confirmed);
+    }
+
+    #[test]
+    fn a_counter_interrogation_completes_with_its_termination() {
+        let now = Instant::now();
+        let mut correlator = Correlator::new();
+        correlator.connected();
+        let request = Qcc::new(5, CounterFreeze::Read).expect("a request");
+        let asdu = procedures::counter_interrogation(STATION, request).expect("builds");
+        let id = sent(
+            &mut correlator,
+            Kind::CounterInterrogation,
+            asdu.clone(),
+            now,
+        );
         assert!(correlator
             .answer(&answer_to(&asdu, cause::ACTIVATION_CONFIRMATION, false))
             .is_empty());

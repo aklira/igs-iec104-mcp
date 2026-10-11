@@ -379,3 +379,20 @@ test can show it.
 - Tests: `points.rs` (the value's range and form, and the ramp refusal), `image.rs` (the decoding of plain
   and invalid counter readings), `tests/station.rs` (a counter point is served, and its update reaches a
   client as a spontaneous counter reading).
+
+## D-022: The counter interrogation as a client action (S4b)
+
+- Date: 2026-10-11 (task S4b).
+- Decision: the control API asks a counter interrogation (C_CI_NA_1) with `POST /v1/interrogation/counter`,
+  body `{"group": 0}` (0 for every counter, the general request; 1 to 4 for a group). Any other group is refused
+  with 400, before anything is sent. The request is correlated like the general interrogation: it is confirmed
+  by its activation confirmation and completes with the activation termination (cause 10). The counter readings
+  that come back (M_IT, causes 37 to 41) go to the point image. Freezing and resetting are not requests of the
+  control API.
+- Contract: a new route is an additive change, so the contract is 1.4.0 (`runtime-api.yaml`, the two event
+  schemas, and `CONTRACT_VERSION`). The request kind `counter_interrogation` is added to the kinds of a request
+  record.
+- Python: `ControlClient.counter_interrogation(group)` posts the same body.
+- Tests: `correlation.rs` (a counter interrogation completes with its termination), and `tests/client_role.rs`
+  (the invalid group is refused with 400; a counter interrogation is accepted; the station's counter reading
+  (M_IT, cause 37) reaches the image with its value).
