@@ -34,7 +34,7 @@ from typing import Any, Protocol
 
 from igs_iec104_mcp.models.common import duration_seconds
 from igs_iec104_mcp.models.run import (
-    TERMINAL,
+    TRANSITIONS,
     Outcome,
     Progress,
     RunStatus,
@@ -148,12 +148,6 @@ class InvalidTransition(Exception):
 
 class _Cancelled(Exception):
     """The run was cancelled during a step."""
-
-
-TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
-    RunStatus.PENDING: frozenset({RunStatus.RUNNING}),
-    RunStatus.RUNNING: frozenset(TERMINAL),
-}
 
 
 class RunMachine:

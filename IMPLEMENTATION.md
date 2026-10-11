@@ -556,6 +556,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 ### Phase R — Reports and resilience (milestone 7)
 
 - **R1 — Run store** (SQLite metadata, event journals, artifact index). Depends: C5.
+  Done (D-032): the store passes its tests (the lifecycle and transitions, a bounded journal, artifacts written once, pages, and a reopen).
 - **R2 — Reports** (JSON, JUnit XML, summary with the manifest of §10). Depends: R1, E2.
 - **R3 — Limits and retention** (event buffers, storage bounds, retention policy). Depends: R1, D2.
 
@@ -617,7 +618,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | X1 External target model and policy | [ ] |
 | X2 Published server endpoints | [ ] |
 | X3 Interoperability, independent implementation ⛔ | [ ] |
-| R1 Run store | [ ] |
+| R1 Run store | [x] |
 | R2 Reports | [ ] |
 | R3 Limits and retention | [ ] |
 | V1 TLS scenarios | [ ] |

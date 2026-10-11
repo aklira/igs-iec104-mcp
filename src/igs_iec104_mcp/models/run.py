@@ -42,6 +42,11 @@ TERMINAL: frozenset[RunStatus] = frozenset(
         RunStatus.ERROR,
     }
 )
+# The statuses a run can move to from each status (§10). An ended run moves nowhere.
+TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
+    RunStatus.PENDING: frozenset({RunStatus.RUNNING}),
+    RunStatus.RUNNING: frozenset(TERMINAL),
+}
 
 
 class Outcome(StrEnum):

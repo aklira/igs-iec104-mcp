@@ -618,3 +618,28 @@ test can show it.
   revision, pagination and its limits, and the server's exit with status 2); `tests/integration/test_mcp_stdio.py` (a
   real MCP client starts the server, lists the nine tools, validates a bench, stores one, reads it back, and sees the
   error codes). The integration job of CI runs the stdio test.
+
+## D-032: The run store (R1)
+
+- Date: 2026-10-11 (task R1).
+- Decision: `storage/runs.py` keeps each run's record in `runs.sqlite3` (metadata, status, times, the counts of the
+  journal, and the artifact index), its event journal in `runs/<id>/events.jsonl` (one canonical JSON line per event,
+  numbered from 1 by the store), and its artifacts in `runs/<id>/artifacts/<name>`. The transitions of a run are the
+  model's `TRANSITIONS`, which moved from the engine to `models/run.py` so that both share one table.
+- Bounded storage (§10): the journal holds at most `max_events` events (10 000 by default). A further event is counted
+  as dropped, and the run's record says how many. An artifact is written once and its SHA-256 is recorded; an artifact
+  larger than `max_artifact_bytes` (16 MiB by default) is refused. A run that has ended takes no more events.
+- Names and paths: a run's identity is 32 hex digits, an artifact's name is a plain lower-case file name, and every
+  path is checked to stay in the project directory once its links are followed.
+- Pages: runs are listed in creation order with a cursor, and events in journal order with a cursor; a page holds at
+  most 200 items.
+- Not in R1: the reconciliation of runs after a restart (D3), the reports (R2), the retention that deletes old runs
+  (R3), and the MCP tools that read the store (M2). The store is one process's; a second controller must not write the
+  same directory.
+- Criterion (the plan gives the general rule for the R tasks, "its tests pass and its reports survive test bench
+  cleanup"): the store's tests pass, and the store does not depend on a Docker resource, so a record survives the
+  removal of its bench.
+- Tests: `tests/unit/test_run_store.py` (21 tests: the lifecycle, the transitions and their refusals, the identities,
+  the journal's order, its canonical lines, the fields the store owns, the bound and the dropped count, a run that has
+  ended, the artifacts with their digest, their names and their size, unknown runs and artifacts, the pages, a page
+  size out of range, the records after a reopen, and a store written by a newer version).
