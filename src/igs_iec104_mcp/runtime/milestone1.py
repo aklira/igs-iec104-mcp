@@ -20,7 +20,12 @@ from typing import Any, TypeVar
 
 from igs_iec104_mcp.runtime.api import ControlClient
 from igs_iec104_mcp.runtime.asdu import single_points
-from igs_iec104_mcp.runtime.process import LocalRuntime, StopResult
+from igs_iec104_mcp.runtime.process import (
+    LocalRuntime,
+    StopResult,
+    read_control_token,
+    write_control_token,
+)
 
 T = TypeVar("T")
 
@@ -82,6 +87,8 @@ async def run_milestone_one(binary: Path, directory: Path) -> MilestoneReport:
     """Runs the milestone with the runtime at `binary`; the points go in `directory`."""
     points = directory / "points.json"
     points.write_text(json.dumps(POINTS), encoding="utf-8")
+    token_file = write_control_token(directory)
+    token = read_control_token(token_file)
     report = MilestoneReport()
     station = LocalRuntime(
         binary,
@@ -92,6 +99,8 @@ async def run_milestone_one(binary: Path, directory: Path) -> MilestoneReport:
             str(points),
             "--control",
             "127.0.0.1:0",
+            "--control-token-file",
+            str(token_file),
         ],
     )
     client = LocalRuntime(binary, [])
@@ -104,12 +113,19 @@ async def run_milestone_one(binary: Path, directory: Path) -> MilestoneReport:
             raise MilestoneError("the station did not report its listen address")
         client = LocalRuntime(
             binary,
-            ["--connect", station_addresses.station, "--control", "127.0.0.1:0"],
+            [
+                "--connect",
+                station_addresses.station,
+                "--control",
+                "127.0.0.1:0",
+                "--control-token-file",
+                str(token_file),
+            ],
         )
         client_addresses = await client.start()
         report.step_seconds["start"] = time.monotonic() - began
-        station_api = ControlClient(station_addresses.control)
-        client_api = ControlClient(client_addresses.control)
+        station_api = ControlClient(station_addresses.control, token)
+        client_api = ControlClient(client_addresses.control, token)
 
         await _run_steps(report, station_api, client_api)
     except MilestoneError as error:

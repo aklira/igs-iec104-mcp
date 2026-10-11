@@ -28,6 +28,12 @@ strict = true
 mypy_path = "src"
 files = ["src", "tests", "scripts"]
 
+# jsonschema ships no type stubs, and types-jsonschema is not a listed dependency: the tests that
+# use it are typed by hand (DECISIONS.md D-009).
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests/unit"]
@@ -35,7 +41,9 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
+    "jsonschema>=4.26,<5",
     "mypy>=2.4,<3",
+    "openapi-spec-validator>=0.7,<1",
     "pytest>=9.1,<10",
     "pytest-asyncio>=1.4,<2",
     "ruff>=0.17,<0.18",

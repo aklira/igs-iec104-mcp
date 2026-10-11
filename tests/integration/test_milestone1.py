@@ -5,25 +5,9 @@ Without it the test is skipped, except in CI (where CI is set): there it fails,
 so that a missing binary cannot pass unnoticed.
 """
 
-import os
 from pathlib import Path
 
-import pytest
-
 from igs_iec104_mcp.runtime.milestone1 import run_milestone_one
-
-
-@pytest.fixture
-def runtime_binary() -> Path:
-    value = os.environ.get("IGS_RUNTIME_BINARY")
-    if not value:
-        message = "set IGS_RUNTIME_BINARY to the igs-iec104-runtime binary"
-        if os.environ.get("CI"):
-            pytest.fail(message)
-        pytest.skip(message)
-    path = Path(value)
-    assert path.is_file(), f"{path} is not a file"
-    return path
 
 
 async def test_milestone_one_passes_with_two_local_runtimes(

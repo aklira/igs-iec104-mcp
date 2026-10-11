@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
+use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -18,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
-use crate::client_role::{Request, Status};
+use crate::client_role::{Request as ClientRequest, Status};
 use crate::events::Recorded;
 use crate::lock;
 use crate::points::{self, PointSpec};
@@ -33,13 +35,38 @@ pub fn router(shared: Arc<Shared>) -> Router {
         .route("/v1/events", get(events))
         .route("/v1/points", get(list_points))
         .route("/v1/points/{address}", get(get_point).post(update_point))
+        // A layer, not a route layer: a request without the token is refused before the router
+        // decides whether the path exists.
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&shared),
+            require_token,
+        ))
         .with_state(shared)
+}
+
+/// Refuses a request that does not carry the control token (IMPLEMENTATION.md §3).
+async fn require_token(
+    State(shared): State<Arc<Shared>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if shared.token.accepts(request.headers().get(AUTHORIZATION)) {
+        return next.run(request).await;
+    }
+    let body = json!({"error": "the control token is missing or wrong"});
+    (
+        StatusCode::UNAUTHORIZED,
+        [(WWW_AUTHENTICATE, "Bearer")],
+        Json(body),
+    )
+        .into_response()
 }
 
 async fn ready(State(shared): State<Arc<Shared>>) -> Json<Value> {
     let mut body = json!({
         "ready": true,
         "control_address": shared.control.to_string(),
+        "contract": crate::CONTRACT_VERSION,
     });
     if let Some(client) = &shared.client {
         let Status {
@@ -71,21 +98,21 @@ fn wrong_role(role: &str) -> Response {
 
 async fn start_transfer(State(shared): State<Arc<Shared>>) -> Response {
     match &shared.client {
-        Some(client) => submit(client, Request::StartTransfer).await,
+        Some(client) => submit(client, ClientRequest::StartTransfer).await,
         None => wrong_role("client"),
     }
 }
 
 async fn general_interrogation(State(shared): State<Arc<Shared>>) -> Response {
     match &shared.client {
-        Some(client) => submit(client, Request::GeneralInterrogation).await,
+        Some(client) => submit(client, ClientRequest::GeneralInterrogation).await,
         None => wrong_role("client"),
     }
 }
 
 async fn submit(
     client: &ClientLink,
-    request: fn(oneshot::Sender<Result<(), String>>) -> Request,
+    request: fn(oneshot::Sender<Result<(), String>>) -> ClientRequest,
 ) -> Response {
     let (reply, answer) = oneshot::channel();
     let outcome = match client.requests.send(request(reply)).await {

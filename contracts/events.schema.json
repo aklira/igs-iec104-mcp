@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "igs-iec104-runtime events",
+  "description": "An event of the client role, as the control API reports it (GET /v1/events). Versioned with runtime-api.yaml: both carry the same contract version.",
+  "$comment": "contract version 1.0.0",
+  "$ref": "#/$defs/Event",
+  "$defs": {
+    "Event": {
+      "description": "One recorded event: its kind selects the fields that follow it.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Connected"
+        },
+        {
+          "$ref": "#/$defs/Disconnected"
+        },
+        {
+          "$ref": "#/$defs/ConnectFailed"
+        },
+        {
+          "$ref": "#/$defs/Discarded"
+        },
+        {
+          "$ref": "#/$defs/Transfer"
+        },
+        {
+          "$ref": "#/$defs/Asdu"
+        },
+        {
+          "$ref": "#/$defs/Transmitted"
+        },
+        {
+          "$ref": "#/$defs/Rejected"
+        },
+        {
+          "$ref": "#/$defs/Unacknowledged"
+        },
+        {
+          "$ref": "#/$defs/Closed"
+        }
+      ]
+    },
+    "Connected": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "connected"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Disconnected": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "error"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "disconnected"
+        },
+        "error": {
+          "type": "string",
+          "description": "The error that ended the connection, as text."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConnectFailed": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "error"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "connect_failed"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Discarded": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "command"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "discarded"
+        },
+        "command": {
+          "type": "string",
+          "description": "The request, as text. It was not sent."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Transfer": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "state"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "transfer"
+        },
+        "state": {
+          "$ref": "#/$defs/TransferState"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Asdu": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "asdu"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "asdu"
+        },
+        "asdu": {
+          "$ref": "#/$defs/AsduView"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Transmitted": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "asdu"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "transmitted"
+        },
+        "asdu": {
+          "$ref": "#/$defs/AsduView"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Rejected": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "detail"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "rejected"
+        },
+        "detail": {
+          "type": "string",
+          "description": "Why a request was not carried out, as text."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Unacknowledged": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind",
+        "asdus"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "unacknowledged"
+        },
+        "asdus": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AsduView"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Closed": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "kind"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "kind": {
+          "const": "closed"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TransferState": {
+      "type": "string",
+      "enum": [
+        "stopped",
+        "pending_started",
+        "started",
+        "pending_stopped",
+        "pending_unconfirmed_stop"
+      ]
+    },
+    "AsduView": {
+      "type": "object",
+      "required": [
+        "type_id",
+        "cause",
+        "negative",
+        "common_address",
+        "bytes_hex"
+      ],
+      "properties": {
+        "type_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The type identification."
+        },
+        "cause": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63,
+          "description": "The cause of transmission, without the P/N and test bits."
+        },
+        "negative": {
+          "type": "boolean",
+          "description": "The P/N bit: a negative confirmation."
+        },
+        "common_address": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "bytes_hex": {
+          "description": "The encoding of the ASDU, in lower-case hexadecimal, or null when it cannot be encoded. The decoded values come with the point image (task C2).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^([0-9a-f]{2})*$"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

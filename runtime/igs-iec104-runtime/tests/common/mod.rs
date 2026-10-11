@@ -1,8 +1,11 @@
-//! Helpers of the integration tests: one HTTP request to the control API, and polling.
+//! Helpers of the integration tests: one HTTP request to the control API, the control token, and
+//! polling.
 
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -13,20 +16,66 @@ use tokio::time::{sleep, timeout};
 /// The longest a test waits for the runtime to reach a state.
 pub const PATIENCE: Duration = Duration::from_secs(10);
 
-/// One HTTP request to the control API, with an optional JSON body. It returns the status code
-/// and the JSON body.
+/// The control token of the tests. It has the form the runtime accepts.
+pub const TOKEN: &str = "C1-test-token-0123456789abcdefghijklmn";
+
+/// A token file of one test, removed when the test ends.
+pub struct TokenFile(pub PathBuf);
+
+impl TokenFile {
+    /// A new token file. Its name is unique within the process, so that tests running at the same
+    /// time do not share a file.
+    pub fn new(name: &str) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("igs-token-{}-{unique}-{name}", std::process::id()));
+        std::fs::write(&path, format!("{TOKEN}\n")).expect("the token file is written");
+        Self(path)
+    }
+}
+
+impl Drop for TokenFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// One HTTP request to the control API with the control token, and an optional JSON body. It
+/// returns the status code and the JSON body.
 pub async fn send(
     control: SocketAddr,
     method: &str,
     path: &str,
     body: Option<&Value>,
 ) -> (u16, Value) {
+    send_with(
+        control,
+        method,
+        path,
+        body,
+        Some(&format!("Bearer {TOKEN}")),
+    )
+    .await
+}
+
+/// One HTTP request to the control API with the `Authorization` header given (or none).
+pub async fn send_with(
+    control: SocketAddr,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    authorization: Option<&str>,
+) -> (u16, Value) {
     let mut stream = TcpStream::connect(control)
         .await
         .expect("the control API accepts");
     let payload = body.map(Value::to_string).unwrap_or_default();
+    let header = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {control}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        "{method} {path} HTTP/1.1\r\nHost: {control}\r\n{header}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
         payload.len()
     );
     stream

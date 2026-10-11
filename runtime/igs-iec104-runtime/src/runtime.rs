@@ -20,6 +20,7 @@ use crate::client_role::{self, Recorder, Request};
 use crate::config::{Config, Role};
 use crate::points::{self, PointError, PointSpec};
 use crate::server_role::{self, Refuse, StationError};
+use crate::token::{ControlToken, TokenError};
 
 /// Requests waiting for the client. A full queue makes a request wait for its turn.
 const REQUEST_QUEUE: usize = 16;
@@ -31,6 +32,8 @@ const STATION_GRACE: Duration = Duration::from_secs(5);
 pub struct Shared {
     /// The address the control API listens on.
     pub control: SocketAddr,
+    /// The token every request of the control API must carry.
+    pub token: ControlToken,
     /// The client, when the runtime runs as one.
     pub client: Option<ClientLink>,
     /// The station, when the runtime runs as one.
@@ -85,6 +88,8 @@ pub enum BindError {
     Points(PointError),
     /// The station cannot start.
     Station(StationError),
+    /// The control token cannot be used.
+    Token(TokenError),
 }
 
 impl fmt::Display for BindError {
@@ -93,6 +98,7 @@ impl fmt::Display for BindError {
             Self::Io(error) => write!(f, "an address could not be bound: {error}"),
             Self::Points(error) => write!(f, "{error}"),
             Self::Station(error) => write!(f, "{error}"),
+            Self::Token(error) => write!(f, "{error}"),
         }
     }
 }
@@ -102,6 +108,7 @@ impl std::error::Error for BindError {}
 impl Runtime {
     /// Binds the control address and starts the role. A client connects in the background.
     pub async fn bind(config: Config) -> Result<Self, BindError> {
+        let token = ControlToken::read(&config.control_token).map_err(BindError::Token)?;
         let control = TcpListener::bind(config.control)
             .await
             .map_err(BindError::Io)?;
@@ -144,6 +151,7 @@ impl Runtime {
             engine,
             shared: Arc::new(Shared {
                 control: control_address,
+                token,
                 client,
                 server,
             }),

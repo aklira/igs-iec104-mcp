@@ -6,7 +6,7 @@ mod common;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use common::{get, post, send, wait_for, PATIENCE};
+use common::{get, post, send, send_with, wait_for, TokenFile, PATIENCE};
 use igs_iec104::{Client, ClientConfig, Delivery, Event};
 use igs_iec104_codec::asdu::{Asdu, Body, Objects};
 use igs_iec104_codec::elements::Qoi;
@@ -55,6 +55,7 @@ struct Running {
 
 impl Running {
     async fn start(points: &PointsFile) -> Self {
+        let token = TokenFile::new("s2");
         let config = Config {
             role: Role::Server {
                 listen: "127.0.0.1:0".parse().expect("address"),
@@ -63,6 +64,7 @@ impl Running {
             common_address: 1,
             control: DEFAULT_CONTROL,
             event_capacity: DEFAULT_EVENT_CAPACITY,
+            control_token: token.0.clone(),
         };
         let runtime = Runtime::bind(config).await.expect("the runtime binds");
         let control = runtime.control_address();
@@ -201,6 +203,27 @@ async fn the_station_lists_its_points_and_refuses_bad_updates() {
 
     let (status, _) = send(control, "POST", "/v1/transfer/start", None).await;
     assert_eq!(status, 409, "a station does not start a transfer");
+
+    running.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_control_api_refuses_a_request_without_the_control_token() {
+    let points = PointsFile::new("auth", POINTS);
+    let running = Running::start(&points).await;
+    let control = running.control;
+
+    let (status, body) = send_with(control, "GET", "/v1/ready", None, None).await;
+    assert_eq!(status, 401, "no token: {body}");
+    assert!(body["error"].is_string());
+
+    let wrong = "Bearer wrong-token-0123456789abcdefghijklmnop";
+    let (status, _) = send_with(control, "GET", "/v1/ready", None, Some(wrong)).await;
+    assert_eq!(status, 401, "a wrong token is refused");
+
+    // The check comes before the routing: an unknown path is not revealed to a caller without it.
+    let (status, _) = send_with(control, "GET", "/v1/no-such-route", None, None).await;
+    assert_eq!(status, 401);
 
     running.stop().await;
 }

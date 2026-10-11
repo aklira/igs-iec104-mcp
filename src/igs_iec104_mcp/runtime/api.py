@@ -1,8 +1,7 @@
-"""The control API of a runtime, from Python (task S3).
+"""The control API of a runtime, from Python (contract 1.0.0, runtime-api.yaml).
 
-The routes are those of the runtime (`runtime/igs-iec104-runtime/src/api.rs`). Until the
-contract of task C1 fixes them, this client is a spike: it follows the routes the
-runtime has now."""
+Every request carries the control token as a bearer credential (D-009).
+"""
 
 from __future__ import annotations
 
@@ -23,8 +22,12 @@ class ControlApiError(Exception):
 class ControlClient:
     """Calls the control API of one runtime."""
 
-    def __init__(self, control: str) -> None:
-        self._http = httpx.AsyncClient(base_url=f"http://{control}", timeout=10.0)
+    def __init__(self, control: str, token: str) -> None:
+        self._http = httpx.AsyncClient(
+            base_url=f"http://{control}",
+            timeout=10.0,
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
     async def aclose(self) -> None:
         await self._http.aclose()

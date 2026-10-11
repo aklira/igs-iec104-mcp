@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import secrets
 import signal
 import time
 from collections import deque
@@ -129,3 +131,20 @@ def _addresses(line: bytes) -> Addresses:
     ):
         raise RuntimeProcessError(f"the address line has an unexpected form: {line!r}")
     return Addresses(control=control, station=station)
+
+
+def write_control_token(directory: Path) -> Path:
+    """Writes a new random control token to a file, readable by its owner only (§3).
+
+    The token is never logged: the file is the only place the controller keeps it.
+    """
+    path = directory / "control-token"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(secrets.token_urlsafe(32) + "\n")
+    return path
+
+
+def read_control_token(path: Path) -> str:
+    """The control token in its file, without the final newline."""
+    return path.read_text(encoding="utf-8").strip()

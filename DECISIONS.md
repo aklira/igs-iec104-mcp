@@ -97,3 +97,36 @@ test can show it.
   seconds (U1).
 - Test: `tests/integration/test_milestone1.py` starts both runtimes this way and runs the milestone
   sequence. `tests/unit/test_asdu.py` checks the reader of the answers.
+
+## D-009: Control API contract, control token, and validators
+
+- Date: 2026-10-11 (task C1).
+- Decision: the contract is `contracts/runtime-api.yaml` (OpenAPI 3.1) and `contracts/events.schema.json`
+  (JSON Schema 2020-12), both at version 1.0.0. The runtime reports the version on readiness as
+  `contract`. Every route of the control API, including the unknown paths, needs the control token:
+  the runtime reads it from the file given by `--control-token-file` (required), and expects
+  `Authorization: Bearer <token>`. The token is at least 32 letters, digits, `-` or `_`; its `Debug`
+  form is redacted, and it is never logged. The controller writes a new token per run, with
+  `secrets.token_urlsafe(32)`, to a file readable by its owner only (mode 0600).
+- Reason: §3 requires a credential per test bench, kept out of logs and reports. A file keeps the
+  token out of the process arguments and the environment. The contract is versioned so that an
+  incompatible change is visible in both files.
+- Validators: `jsonschema` and `openapi-spec-validator` (both approved for C1) are development
+  dependencies, used by the tests. `jsonschema` ships no type stubs, and `types-jsonschema` is not a
+  listed dependency: mypy ignores missing imports for `jsonschema` (pyproject, tests only).
+- Tests: `tests/unit/test_contract_documents.py` (both documents are valid, and they name the same
+  version); `tests/integration/test_contract.py` (each response of a station and a client has a
+  documented status and a body that matches its schema, and the requests without the token are
+  refused with 401); `runtime/igs-iec104-runtime/tests/contract.rs` (every event kind matches the
+  schema, and the schema names exactly the kinds the client records); and
+  `runtime/igs-iec104-runtime/tests/server_role.rs` (no token, or a wrong one, gives 401 on every path).
+
+## D-010: Decoded values of the ASDUs come with the point image (C2)
+
+- Date: 2026-10-11 (task C1).
+- Decision: the contract gives each ASDU as its header (type identification, cause, P/N bit, common
+  address) and its hexadecimal encoding. The decoded values are not in version 1.0.0. They come with
+  the point image of task C2, as an addition that keeps the version compatible.
+- Reason: the decoded form depends on the point image (values, quality, time tags, and the point
+  types of the station), which C2 builds. Describing it now would fix a shape before the code that
+  produces it exists.

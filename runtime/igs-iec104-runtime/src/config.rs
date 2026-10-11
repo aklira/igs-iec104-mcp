@@ -42,6 +42,8 @@ pub struct Config {
     pub control: SocketAddr,
     /// The number of events kept before the oldest are dropped.
     pub event_capacity: usize,
+    /// The file with the control token (see `token`). It is required.
+    pub control_token: PathBuf,
 }
 
 /// What the command line asks for.
@@ -70,6 +72,8 @@ pub enum ConfigError {
     MissingPoints,
     /// `--points` was given to a client, which serves no points.
     PointsWithClient,
+    /// `--control-token-file` was not given: the control API is never open without a token.
+    MissingToken,
     /// A value out of its range, or not a valid address or number.
     Invalid {
         /// The option.
@@ -93,6 +97,7 @@ impl fmt::Display for ConfigError {
             Self::PointsWithClient => {
                 write!(f, "--points is for a station; a client serves no points")
             }
+            Self::MissingToken => write!(f, "--control-token-file FILE is required"),
             Self::Invalid { option, value } => write!(f, "invalid value {value:?} for {option}"),
         }
     }
@@ -110,6 +115,7 @@ pub const USAGE: &str =
   --common-address N        the common address of the station, 1 to 65534 (default 1)
   --control ADDRESS         the address of the control API (default 127.0.0.1:0)
   --event-capacity N        the events kept for the control API (default 1024)
+  --control-token-file FILE the file with the control token, required
   -h, --help                print this usage
 
 With no arguments, the runtime prints its identity and exits.";
@@ -130,6 +136,7 @@ where
     let mut common_address = 1;
     let mut control = DEFAULT_CONTROL;
     let mut event_capacity = DEFAULT_EVENT_CAPACITY;
+    let mut control_token = None;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "-h" | "--help" => return Ok(Invocation::Usage),
@@ -149,6 +156,12 @@ where
                 let text = value("--event-capacity", &mut arguments)?;
                 event_capacity = number("--event-capacity", &text, 1..=MAX_EVENT_CAPACITY)?;
             }
+            "--control-token-file" => {
+                control_token = Some(PathBuf::from(value(
+                    "--control-token-file",
+                    &mut arguments,
+                )?));
+            }
             _ => return Err(ConfigError::UnknownOption(argument)),
         }
     }
@@ -167,11 +180,13 @@ where
             points: points.ok_or(ConfigError::MissingPoints)?,
         },
     };
+    let control_token = control_token.ok_or(ConfigError::MissingToken)?;
     Ok(Invocation::Run(Config {
         role,
         common_address,
         control,
         event_capacity,
+        control_token,
     }))
 }
 
@@ -217,8 +232,11 @@ mod tests {
         list.iter().map(|argument| (*argument).to_owned()).collect()
     }
 
+    /// Runs a command line with a token file, as every run needs one.
     fn run(list: &[&str]) -> Result<Config, ConfigError> {
-        match parse(args(list))? {
+        let mut with_token = list.to_vec();
+        with_token.extend(["--control-token-file", "token.txt"]);
+        match parse(args(&with_token))? {
             Invocation::Run(config) => Ok(config),
             other => panic!("expected a run, got {other:?}"),
         }
@@ -236,6 +254,16 @@ mod tests {
             parse(args(&["--connect", "127.0.0.1:2404", "-h"])),
             Ok(Invocation::Usage)
         );
+    }
+
+    #[test]
+    fn a_run_needs_a_control_token_file() {
+        assert_eq!(
+            parse(args(&["--connect", "127.0.0.1:2404"])),
+            Err(ConfigError::MissingToken)
+        );
+        let config = run(&["--connect", "127.0.0.1:2404"]).expect("valid");
+        assert_eq!(config.control_token, PathBuf::from("token.txt"));
     }
 
     #[test]

@@ -7,7 +7,7 @@ mod common;
 
 use std::net::SocketAddr;
 
-use common::{get, has_event, post, send, wait_for};
+use common::{get, has_event, post, send, wait_for, TokenFile};
 use igs_iec104::process_image::PointValue;
 use igs_iec104::server::{Handler, Operation, Refusal, Server, ServerConfig};
 use igs_iec104_codec::elements::{QualityFlags, Siq};
@@ -49,18 +49,20 @@ async fn station() -> SocketAddr {
     address
 }
 
-fn config(connect: SocketAddr) -> Config {
+fn config(connect: SocketAddr, token: &TokenFile) -> Config {
     Config {
         role: Role::Client { connect },
         common_address: 1,
         control: DEFAULT_CONTROL,
         event_capacity: DEFAULT_EVENT_CAPACITY,
+        control_token: token.0.clone(),
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_interrogation() {
-    let runtime = Runtime::bind(config(station().await))
+    let token = TokenFile::new("s1-interrogation");
+    let runtime = Runtime::bind(config(station().await, &token))
         .await
         .expect("the runtime binds");
     let control = runtime.control_address();
@@ -122,6 +124,7 @@ async fn the_control_api_starts_the_transfer_and_returns_the_answers_of_an_inter
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_request_made_without_a_connection_is_reported_as_discarded() {
+    let token = TokenFile::new("s1-discarded");
     // A port that nothing listens on: the client cannot connect.
     let closed = {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -129,7 +132,7 @@ async fn a_request_made_without_a_connection_is_reported_as_discarded() {
             .expect("a port is free");
         listener.local_addr().expect("the port has an address")
     };
-    let runtime = Runtime::bind(config(closed))
+    let runtime = Runtime::bind(config(closed, &token))
         .await
         .expect("the runtime binds");
     let control = runtime.control_address();
