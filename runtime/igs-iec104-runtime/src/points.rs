@@ -21,7 +21,7 @@ use std::path::Path;
 
 use igs_iec104::process_image::PointValue;
 use igs_iec104_codec::elements::{
-    Bcr, Diq, DoublePoint, Nva, Qds, QualityFlags, ShortFloat, Siq, Sva,
+    Bcr, Bsi, Diq, DoublePoint, Nva, Qds, QualityFlags, ShortFloat, Siq, Sva, Vti,
 };
 use igs_iec104_codec::header::InformationObjectAddress;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,12 @@ pub enum Kind {
     /// Integrated total (a binary counter reading): M_IT_NA_1, or M_IT_TB_1 when stamped. Its
     /// value is an integer from -2147483648 to 2147483647.
     Counter,
+    /// Step position: M_ST_NA_1, or M_ST_TB_1 when stamped. Its value is an object with `value`, an
+    /// integer from -64 to 63, and `transient`, true or false.
+    Step,
+    /// Bitstring of 32 bits: M_BO_NA_1, or M_BO_TB_1 when stamped. Its value is an integer from 0 to
+    /// 4294967295, where bit n (1 to 32) is the bit of 2^(n - 1).
+    Bitstring,
 }
 
 impl Kind {
@@ -65,6 +71,8 @@ impl Kind {
             Self::Scaled => "an integer from -32768 to 32767",
             Self::Float => "a finite number",
             Self::Counter => "an integer from -2147483648 to 2147483647",
+            Self::Step => "an object with 'value' from -64 to 63 and 'transient' true or false",
+            Self::Bitstring => "an integer from 0 to 4294967295",
         }
     }
 }
@@ -346,7 +354,38 @@ pub fn value_of(kind: Kind, address: u32, json: &Value) -> Result<PointValue, Po
             // The sequence number is the reading's own: a served counter starts at 0.
             PointValue::Counter(Bcr::new(counter, 0).ok_or_else(invalid)?)
         }
+        Kind::Step => {
+            let object = json.as_object().filter(|object| object.len() == 2);
+            let object = object.ok_or_else(invalid)?;
+            let value = object
+                .get("value")
+                .and_then(Value::as_i64)
+                .ok_or_else(invalid)?;
+            let value = i8::try_from(value).map_err(|_| invalid())?;
+            let transient = object.get("transient").and_then(Value::as_bool);
+            let transient = transient.ok_or_else(invalid)?;
+            PointValue::Step(Vti::new(value, transient).ok_or_else(invalid)?, quality)
+        }
+        Kind::Bitstring => {
+            let number = json.as_u64().ok_or_else(invalid)?;
+            let number = u32::try_from(number).map_err(|_| invalid())?;
+            PointValue::Bitstring(bitstring_from(number).ok_or_else(invalid)?, quality)
+        }
     })
+}
+
+/// The bitstring whose bit n (1 to 32) is bit n - 1 of `number`.
+fn bitstring_from(number: u32) -> Option<Bsi> {
+    (1..=32u8).try_fold(Bsi::new(), |bits, bit| {
+        bits.with_bit(bit, number & (1u32 << (bit - 1)) != 0)
+    })
+}
+
+/// The integer of a bitstring: bit n (1 to 32) is the bit of 2^(n - 1).
+fn bitstring_to(bits: Bsi) -> u32 {
+    (1..=32u8)
+        .filter(|&bit| bits.bit(bit) == Some(true))
+        .fold(0, |number, bit| number | (1u32 << (bit - 1)))
 }
 
 fn double_from(json: &Value) -> Option<DoublePoint> {
@@ -376,6 +415,11 @@ pub fn json_of(value: PointValue) -> Value {
         PointValue::Scaled(sva, _) => Value::from(sva.value()),
         PointValue::Float(float, _) => number(f64::from(float.as_f32())),
         PointValue::Counter(counter) => Value::from(counter.counter()),
+        PointValue::Step(step, _) => serde_json::json!({
+            "value": step.value(),
+            "transient": step.is_transient(),
+        }),
+        PointValue::Bitstring(bits, _) => Value::from(bitstring_to(bits)),
         _ => Value::Null,
     }
 }
@@ -492,5 +536,60 @@ mod tests {
         let ramp = r#"{"address": 1, "kind": "counter", "value": 1,
             "simulation": {"kind": "ramp", "period_ms": 100, "increment": 1.0}}"#;
         assert!(parse(&file(ramp)).is_err(), "a ramp needs a measured point");
+    }
+
+    #[test]
+    fn a_step_and_a_bitstring_take_their_forms_and_come_back_as_they_went() {
+        let points = parse(&file(
+            r#"{"address": 1, "kind": "step", "value": {"value": -64, "transient": true}},
+               {"address": 2, "kind": "bitstring", "value": 2147483649}"#,
+        ))
+        .expect("the forms are accepted");
+        let step = json_of(points[0].point_value().expect("a step"));
+        assert_eq!(step, serde_json::json!({"value": -64, "transient": true}));
+        let bits = json_of(points[1].point_value().expect("a bitstring"));
+        assert_eq!(bits, serde_json::json!(2_147_483_649_u64));
+        for u32_max in [0_u64, 1, 4_294_967_295] {
+            let text = file(&format!(
+                r#"{{"address": 1, "kind": "bitstring", "value": {u32_max}}}"#
+            ));
+            let point = &parse(&text).expect("a bitstring")[0];
+            assert_eq!(
+                json_of(point.point_value().expect("a value")),
+                serde_json::json!(u32_max)
+            );
+        }
+    }
+
+    #[test]
+    fn a_step_or_a_bitstring_outside_its_form_is_refused() {
+        let bad = [
+            r#"{"address": 1, "kind": "step", "value": {"value": 64, "transient": false}}"#,
+            r#"{"address": 1, "kind": "step", "value": {"value": 1}}"#,
+            r#"{"address": 1, "kind": "step", "value": {"value": 1, "transient": false, "x": 1}}"#,
+            r#"{"address": 1, "kind": "step", "value": 1}"#,
+            r#"{"address": 1, "kind": "bitstring", "value": 4294967296}"#,
+            r#"{"address": 1, "kind": "bitstring", "value": -1}"#,
+            r#"{"address": 1, "kind": "bitstring", "value": 1.5}"#,
+        ];
+        for text in bad {
+            assert!(parse(&file(text)).is_err(), "{text} is not a valid form");
+        }
+    }
+
+    #[test]
+    fn a_step_and_a_bitstring_cannot_be_simulated() {
+        for kind in ["step", "bitstring"] {
+            let text = format!(
+                r#"{{"address": 1, "kind": "{kind}", "value": {value},
+                    "simulation": {{"kind": "walk", "period_ms": 100, "increment": 1.0}}}}"#,
+                value = if kind == "step" {
+                    r#"{"value": 0, "transient": false}"#
+                } else {
+                    "0"
+                },
+            );
+            assert!(parse(&file(&text)).is_err(), "{kind} cannot be a walk");
+        }
     }
 }

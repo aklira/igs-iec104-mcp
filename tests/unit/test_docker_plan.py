@@ -81,13 +81,12 @@ def test_the_event_buffer_is_the_capacity_of_the_runtime() -> None:
 def test_a_point_kind_the_runtime_does_not_serve_is_refused_by_name() -> None:
     data = copy.deepcopy(BENCH)
     instance(data, "server-1")["points"] = [
-        {"address": 1, "kind": "counter", "value": 7},
-        {"address": 2, "kind": "step", "value": {"value": 1, "transient": False}},
-        {"address": 3, "kind": "bitstring", "value": 5},
+        {"address": 1, "kind": "packed", "value": {"status": 1, "change": 0}},
+        {"address": 2, "kind": "normalized_unqualified", "value": 0.5},
     ]
     (issue,) = refused(data)
     assert "server-1" in issue
-    assert "bitstring, step" in issue
+    assert "normalized_unqualified, packed" in issue
     assert "S4" in issue
 
 

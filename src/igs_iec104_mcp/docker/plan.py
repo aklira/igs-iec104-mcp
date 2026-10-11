@@ -29,9 +29,19 @@ from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.instance import Instance, LinkParameters, ResourceLimits
 
 # The point kinds the runtime serves (its `points.rs`). The others are refused by
-# name until task S4 serves them (D-019); counter is served since S4a.
+# name until task S4 serves them (D-019). Served so far: counter (S4a), step and
+# bitstring (S4c).
 SERVED_KINDS: frozenset[str] = frozenset(
-    {"single", "double", "normalized", "scaled", "float", "counter"}
+    {
+        "single",
+        "double",
+        "normalized",
+        "scaled",
+        "float",
+        "counter",
+        "step",
+        "bitstring",
+    }
 )
 # The link parameters the runtime uses: the defaults of §9.6, which the model carries.
 RUNTIME_PARAMETERS = LinkParameters()

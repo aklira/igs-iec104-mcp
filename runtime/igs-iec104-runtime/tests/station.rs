@@ -385,3 +385,79 @@ async fn a_counter_point_is_served_and_its_update_reaches_the_client() {
     drop(client);
     station.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_step_and_a_bitstring_point_are_served_and_their_updates_reach_the_client() {
+    let points = PointsFile::new(
+        "step-bits",
+        r#"{"schema_version": 1, "points": [
+            {"address": 5, "kind": "step", "value": {"value": 3, "transient": false}},
+            {"address": 6, "kind": "bitstring", "value": 0}
+        ]}"#,
+    );
+    let token = TokenFile::new("s4c-step-bits");
+    let station = Station::start(&points, 1024, Duration::from_secs(30), &token).await;
+    let mut client = controller(station.listen).await;
+
+    let (status, body) = get(station.control, "/v1/points/5").await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        body["value"],
+        serde_json::json!({"value": 3, "transient": false})
+    );
+
+    let (status, _) = post(
+        station.control,
+        "/v1/points/5",
+        &serde_json::json!({"value": {"value": -2, "transient": true}}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let (status, _) = post(
+        station.control,
+        "/v1/points/6",
+        &serde_json::json!({"value": 9}),
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // The updates leave as spontaneous readings: a step (M_ST_NA_1) and a bitstring (M_BO_NA_1).
+    let step = next_reading(&mut client, Body::M_ST_NA_1(Objects::Individual(vec![])), 5).await;
+    let Body::M_ST_NA_1(Objects::Individual(objects)) = &step.body else {
+        panic!("a step reading is an individual object list");
+    };
+    assert_eq!(objects[0].value.0.value(), -2);
+    assert!(objects[0].value.0.is_transient());
+
+    let bits = next_reading(&mut client, Body::M_BO_NA_1(Objects::Individual(vec![])), 6).await;
+    let Body::M_BO_NA_1(Objects::Individual(objects)) = &bits.body else {
+        panic!("a bitstring reading is an individual object list");
+    };
+    // 9 is 2^0 + 2^3: bits 1 and 4 are on, as the number of each bit (1 to 32) gives.
+    let state = objects[0].value.0;
+    assert_eq!(state.bit(1), Some(true));
+    assert_eq!(state.bit(2), Some(false));
+    assert_eq!(state.bit(4), Some(true));
+
+    drop(client);
+    station.stop().await;
+}
+
+/// The next spontaneous reading of the type of `shape`, for the address `address`.
+async fn next_reading(client: &mut Client, shape: Body, address: u32) -> Asdu {
+    let type_id = shape.type_id();
+    timeout(PATIENCE, async {
+        while let Some(event) = client.next_event().await {
+            if let Event::Delivery(Delivery::Asdu(asdu)) = event {
+                if asdu.body.type_id() == type_id
+                    && asdu.body.first_address() == InformationObjectAddress::new(address)
+                {
+                    return asdu;
+                }
+            }
+        }
+        panic!("the connection ended before the reading");
+    })
+    .await
+    .expect("the reading arrives within the patience of the test")
+}

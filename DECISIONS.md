@@ -396,3 +396,20 @@ test can show it.
 - Tests: `correlation.rs` (a counter interrogation completes with its termination), and `tests/client_role.rs`
   (the invalid group is refused with 400; a counter interrogation is accepted; the station's counter reading
   (M_IT, cause 37) reaches the image with its value).
+
+## D-023: The step and bitstring point kinds (S4c)
+
+- Date: 2026-10-11 (task S4c).
+- Decision: the runtime serves `step` points (M_ST_NA_1, or M_ST_TB_1 when stamped), whose value is an object
+  `{"value": -64..63, "transient": true|false}`, and `bitstring` points (M_BO_NA_1, or M_BO_TB_1 when stamped),
+  whose value is an integer from 0 to 4294967295. In the bitstring, bit n (1 to 32) is the bit of 2^(n - 1): the
+  number is read and written through the bit numbers of the upstream `Bsi`, so the number is the one the peer
+  sees. The client decodes both into its point image, with the quality of the value. Neither can be simulated:
+  a walk or a ramp needs a measured point, and a toggle a single or double point.
+- Contract: a new point kind is additive, so the contract is 1.5.0.
+- The upstream `Bsi` has no constructor from a number: the runtime builds it bit by bit (`with_bit`) and reads it
+  back (`bit`), so the mapping rests on the upstream bit numbering alone.
+- Tests: `points.rs` (the forms, the round trip of step and bitstring, the refusals of the forms, the refusal of a
+  simulation), `image.rs` (the decoding of plain and time-tagged step and bitstring readings), and
+  `tests/station.rs` (a step and a bitstring are served, and their updates reach a client as M_ST and M_BO
+  readings with their values).

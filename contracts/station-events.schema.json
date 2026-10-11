@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "igs-iec104-runtime station events",
   "description": "An event of the station role, as the control API reports it (GET /v1/station/events): its connections, the state of their data transfer, and the commands it judged. Versioned with runtime-api.yaml.",
-  "$comment": "contract version 1.4.0",
+  "$comment": "contract version 1.5.0",
   "$ref": "#/$defs/StationEvent",
   "$defs": {
     "StationEvent": {

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use igs_iec104::process_image::PointValue;
 use igs_iec104_codec::asdu::{Asdu, Body, Objects, Timed};
-use igs_iec104_codec::elements::{Bcr, Diq, Qds, QualityFlags, Siq};
+use igs_iec104_codec::elements::{Bcr, Bsi, Diq, Qds, QualityFlags, Siq, Vti};
 use igs_iec104_codec::formats::Cp56Time2a;
 use igs_iec104_codec::generated::profile::TypeId;
 
@@ -137,6 +137,10 @@ pub fn observations(asdu: &Asdu) -> Vec<(u32, Observed)> {
         }),
         Body::M_IT_NA_1(objects) => plain(objects, |bcr| counter(bcr, None)),
         Body::M_IT_TB_1(objects) => stamped(objects, |bcr| counter(bcr, None)),
+        Body::M_ST_NA_1(objects) => plain(objects, |(vti, qds)| step(vti, qds, None)),
+        Body::M_ST_TB_1(objects) => stamped(objects, |(vti, qds)| step(vti, qds, None)),
+        Body::M_BO_NA_1(objects) => plain(objects, |(bsi, qds)| bitstring(bsi, qds, None)),
+        Body::M_BO_TB_1(objects) => stamped(objects, |(bsi, qds)| bitstring(bsi, qds, None)),
         _ => Vec::new(),
     }
 }
@@ -215,6 +219,22 @@ fn counter(bcr: Bcr, time: Option<Cp56Time2a>) -> Observed {
     }
 }
 
+fn step(vti: Vti, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
+    Observed {
+        value: PointValue::Step(vti, qds),
+        quality: Quality::of(qds.quality, false),
+        time,
+    }
+}
+
+fn bitstring(bits: Bsi, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
+    Observed {
+        value: PointValue::Bitstring(bits, qds),
+        quality: Quality::of(qds.quality, false),
+        time,
+    }
+}
+
 fn measured(value: PointValue, qds: Qds, time: Option<Cp56Time2a>) -> Observed {
     Observed {
         value,
@@ -275,6 +295,36 @@ mod tests {
         assert!(!observed[0].1.quality.invalid);
         assert!(observed[1].1.quality.invalid);
         assert_eq!(observed[1].1.time, None);
+    }
+
+    #[test]
+    fn a_step_and_a_bitstring_are_observed_with_their_time_tags() {
+        let vti = Vti::new(-3, true).expect("a step");
+        let mut bits = Bsi::new();
+        bits = bits.with_bit(2, true).expect("bit 2");
+        let steps = observations(&asdu(
+            cause::SPONTANEOUS,
+            Body::M_ST_NA_1(individual(vec![(5, (vti, Qds::default()))])),
+        ));
+        assert_eq!(steps[0].0, 5);
+        assert_eq!(steps[0].1.value, PointValue::Step(vti, Qds::default()));
+        assert_eq!(steps[0].1.time, None);
+        let stamped = observations(&asdu(
+            cause::SPONTANEOUS,
+            Body::M_BO_TB_1(individual(vec![(
+                6,
+                Timed {
+                    value: (bits, Qds::default()),
+                    time: time(),
+                },
+            )])),
+        ));
+        assert_eq!(stamped[0].0, 6);
+        assert_eq!(
+            stamped[0].1.value,
+            PointValue::Bitstring(bits, Qds::default())
+        );
+        assert!(stamped[0].1.time.is_some());
     }
 
     fn on(on: bool) -> Siq {
