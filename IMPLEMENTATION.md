@@ -513,6 +513,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 **E5 — Restart and reconnect primitives**
 - Depends: D2, E1, U2.
 - Done when: an end-to-end scenario restarts the server and asserts that the client reconnects, starts the transfer, and interrogates again.
+- Done (D-030): the instance actions over a local bench (station and client as processes). The restart of a container of the managed (Docker) bench is not in E5: it needs a fixed station port in the plan.
 
 ### Phase M — MCP integration (milestone 5)
 
@@ -607,7 +608,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E2b Runtime-backed observation source | [x] |
 | E3 Cancellation and cleanup | [x] |
 | E4 Parallel branches and barriers | [x] |
-| E5 Restart and reconnect primitives | [ ] |
+| E5 Restart and reconnect primitives | [x] |
 | M1 MCP server over stdio | [ ] |
 | M2 Scenario and run tools | [ ] |
 | M3 Confirmation on external targets | [ ] |

@@ -29,6 +29,7 @@ ACTIONS: tuple[str, ...] = (
     "wait_transfer_started",
     "wait_connection",
     "general_interrogation",
+    "start_transfer",
     "assert_point",
     "expect_point",
     "update_point",
@@ -132,6 +133,7 @@ class UpdatePoint(Definition):
     server: Name
     address: Address
     value: Any
+    timeout: Timing = DEFAULT_TIMEOUT
 
 
 class SendCommand(Definition):
@@ -163,14 +165,29 @@ class SendCommand(Definition):
         return self
 
 
+class StartTransfer(Definition):
+    """Requests the data transfer of a client, and waits until it is started (§8)."""
+
+    action: Literal["start_transfer"]
+    client: Name
+    timeout: Timing = DEFAULT_TIMEOUT
+
+
 class StopInstance(Definition):
+    """Stops a managed instance. A client that was connected to it must record the
+    disconnection before the step passes (§8)."""
+
     action: Literal["stop_instance"]
     instance: Name
+    timeout: Timing = DEFAULT_TIMEOUT
 
 
 class StartInstance(Definition):
+    """Starts a managed instance again, on the addresses it had (§8)."""
+
     action: Literal["start_instance"]
     instance: Name
+    timeout: Timing = DEFAULT_TIMEOUT
 
 
 class Parallel(Definition):
@@ -206,6 +223,7 @@ Step = Annotated[
     WaitTransferStarted
     | WaitConnection
     | GeneralInterrogation
+    | StartTransfer
     | AssertPoint
     | ExpectPoint
     | UpdatePoint
@@ -293,7 +311,14 @@ class _Checker:
             for number, branch in enumerate(step.branches):
                 self.steps(branch, f"{where}.branches[{number}]", issues)
         elif isinstance(
-            step, (WaitTransferStarted, GeneralInterrogation, AssertPoint, ExpectPoint)
+            step,
+            (
+                WaitTransferStarted,
+                GeneralInterrogation,
+                StartTransfer,
+                AssertPoint,
+                ExpectPoint,
+            ),
         ):
             self.client(step.client, where, issues)
         elif isinstance(step, WaitConnection):

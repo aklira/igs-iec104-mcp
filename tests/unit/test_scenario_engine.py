@@ -510,9 +510,12 @@ async def test_a_cleanup_step_is_bounded_by_its_deadline_after_the_global_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(engine, "CLEANUP_SECONDS", 0.1)
+    # A parallel cleanup step names no timeout of its own, so its barrier takes the
+    # cleanup deadline. (A step with its own timeout keeps that timeout.)
+    barrier = {"action": "parallel", "branches": [[STOP]]}
     result = await asyncio.wait_for(
         execute(
-            scenario([GENERAL], cleanup=[STOP], global_timeout="200ms"),
+            scenario([GENERAL], cleanup=[barrier], global_timeout="200ms"),
             logging_handlers([], general_interrogation=hanging, stop_instance=hanging),
             FakeRuntime(),
         ),
@@ -521,6 +524,10 @@ async def test_a_cleanup_step_is_bounded_by_its_deadline_after_the_global_one(
     assert [v.outcome for v in result.verdicts] == [
         Outcome.TIMED_OUT,
         Outcome.TIMED_OUT,
+        Outcome.TIMED_OUT,
     ]
-    assert result.verdicts[1].detail == "no result within 0.1 s"
+    assert result.verdicts[-1].step == "cleanup 1: parallel"
+    assert result.verdicts[-1].detail == (
+        "no result within 0.1 s: 1 of 1 branches still running"
+    )
     assert result.status is RunStatus.FAILED

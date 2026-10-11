@@ -236,6 +236,7 @@
                   "parallel": "#/$defs/Parallel",
                   "send_command": "#/$defs/SendCommand",
                   "start_instance": "#/$defs/StartInstance",
+                  "start_transfer": "#/$defs/StartTransfer",
                   "stop_instance": "#/$defs/StopInstance",
                   "update_point": "#/$defs/UpdatePoint",
                   "wait_connection": "#/$defs/WaitConnection",
@@ -252,6 +253,9 @@
                 },
                 {
                   "$ref": "#/$defs/GeneralInterrogation"
+                },
+                {
+                  "$ref": "#/$defs/StartTransfer"
                 },
                 {
                   "$ref": "#/$defs/AssertPoint"
@@ -447,6 +451,7 @@
     },
     "StartInstance": {
       "additionalProperties": false,
+      "description": "Starts a managed instance again, on the addresses it had (\u00a78).",
       "properties": {
         "action": {
           "const": "start_instance",
@@ -455,6 +460,11 @@
         },
         "instance": {
           "title": "Instance",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
           "type": "string"
         }
       },
@@ -465,8 +475,35 @@
       "title": "StartInstance",
       "type": "object"
     },
+    "StartTransfer": {
+      "additionalProperties": false,
+      "description": "Requests the data transfer of a client, and waits until it is started (\u00a78).",
+      "properties": {
+        "action": {
+          "const": "start_transfer",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client"
+      ],
+      "title": "StartTransfer",
+      "type": "object"
+    },
     "StopInstance": {
       "additionalProperties": false,
+      "description": "Stops a managed instance. A client that was connected to it must record the\ndisconnection before the step passes (\u00a78).",
       "properties": {
         "action": {
           "const": "stop_instance",
@@ -475,6 +512,11 @@
         },
         "instance": {
           "title": "Instance",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
           "type": "string"
         }
       },
@@ -500,6 +542,11 @@
         },
         "server": {
           "title": "Server",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
           "type": "string"
         },
         "value": {
@@ -586,6 +633,7 @@
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
             "start_instance": "#/$defs/StartInstance",
+            "start_transfer": "#/$defs/StartTransfer",
             "stop_instance": "#/$defs/StopInstance",
             "update_point": "#/$defs/UpdatePoint",
             "wait_connection": "#/$defs/WaitConnection",
@@ -602,6 +650,9 @@
           },
           {
             "$ref": "#/$defs/GeneralInterrogation"
+          },
+          {
+            "$ref": "#/$defs/StartTransfer"
           },
           {
             "$ref": "#/$defs/AssertPoint"
@@ -666,6 +717,7 @@
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
             "start_instance": "#/$defs/StartInstance",
+            "start_transfer": "#/$defs/StartTransfer",
             "stop_instance": "#/$defs/StopInstance",
             "update_point": "#/$defs/UpdatePoint",
             "wait_connection": "#/$defs/WaitConnection",
@@ -682,6 +734,9 @@
           },
           {
             "$ref": "#/$defs/GeneralInterrogation"
+          },
+          {
+            "$ref": "#/$defs/StartTransfer"
           },
           {
             "$ref": "#/$defs/AssertPoint"

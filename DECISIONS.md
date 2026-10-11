@@ -551,3 +551,38 @@ test can show it.
   together; a failed branch step under fail-fast stops the others; without fail-fast every branch runs to its end;
   a deadline during the barrier; the global deadline during the branches; a cancellation during the branches; a
   parallel step inside a branch has its own barrier). The engine tests are unchanged and pass.
+
+## D-030: Restart and reconnect: the instance actions and the local bench (E5)
+
+- Date: 2026-10-11 (task E5).
+- Decision: the actions that drive the instances of a bench are handled in `scenarios/actions.py`, over a `Bench`
+  (the control API of each instance, the clients of each station, and how an instance is stopped and started
+  again). Four actions are new to the handlers, and one is new to the model:
+  - `start_transfer` (new to the model). The library does not restart the data transfer after it reconnects (its
+    reconnect loop only re-establishes the connection), so a scenario must request the transfer again. The step
+    waits until the client reports the transfer started.
+  - `stop_instance` waits until each client that was connected records the disconnection (its `ready` shows the
+    connection down), so that a later wait for the connection cannot see the connection from before the stop.
+  - `start_instance` starts the instance again on the arguments it had, and returns once it answers.
+  - `wait_connection` and `wait_transfer_started` wait on the state `ready` reports, which the runtime updates as
+    it records the connection and the transfer. `general_interrogation` waits for the end of the interrogation (cause
+    10) after its cursor, so an earlier end cannot satisfy it. `update_point` waits until the station stores the
+    value.
+- Model: `start_transfer` is added to the actions and the steps; `stop_instance`, `start_instance`, and
+  `update_point` gain the `timeout` every other action has (a wait without a deadline could never end). The
+  scenario schema is regenerated.
+- `wait_connection` on a station is an ERROR: a station has no connection of its own, and a pass would be wrong.
+- `runtime/local_bench.py` (`LocalBench`): one station and one client as local processes. The station's listening and
+  control ports are chosen when the bench is made, and an instance that starts again gets the same arguments, so it
+  answers on the same addresses.
+- Not in E5: the restart of a container of the Docker bench. The station binds port 0 in a managed bench, so a restart
+  changes its port and the client's target goes stale. A managed restart needs a fixed station port in the plan
+  (D2), which is a decision of its own. The restart of a managed instance stays open.
+- E3's test of the cleanup deadline changed: `stop_instance` now has its own timeout, so the cleanup deadline is
+  tested with a parallel cleanup step, whose barrier takes it. A step with its own timeout keeps that timeout.
+- Tests: `tests/unit/test_scenario_actions.py` (a wait for the connection passes when the client comes up; a station
+  is an error; the transfer is requested and awaited; an interrogation ignores an earlier end; a stop waits for its
+  clients to disconnect, passes at once without a connected client, and times out when a client never disconnects;
+  an update waits for the stored value); `tests/integration/test_restart_scenario.py` (a station is restarted under
+  a scenario, the client reconnects, starts its transfer, interrogates again, and reads the restarted station's
+  value; a reconnect that does not come in time times out, and the cleanup starts the station again).
