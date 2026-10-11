@@ -39,6 +39,10 @@ uv run mypy
 uv run pytest tests/unit
 ```
 
+The integration tests build the runtime first (`cargo build --locked --package igs-iec104-runtime`
+in `runtime/`) and set `IGS_RUNTIME_BINARY` to the binary; they run with
+`uv run pytest tests/integration`.
+
 Run `uv sync --locked` first. The Rust runtime has its own gate, in `runtime/`:
 
 ```bash

@@ -63,6 +63,12 @@ async fn run(config: Config) -> ExitCode {
     if let Some(station) = runtime.station_address() {
         tracing::info!(%station, "station listening");
     }
+    // The bound addresses, once, on standard output: a controller that gave port 0 learns them here.
+    let addresses = serde_json::json!({
+        "control_address": runtime.control_address().to_string(),
+        "station_address": runtime.station_address().map(|address| address.to_string()),
+    });
+    println!("{addresses}");
     match runtime.serve(stop_requested()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

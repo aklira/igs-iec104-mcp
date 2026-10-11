@@ -83,3 +83,17 @@ test can show it.
 - Enforcement: `scripts/check_licences.py` checks the installed distributions, and CI runs it.
   `tests/unit/test_licence_policy.py` checks the admitted and refused expressions.
 - Scope: the Rust runtime keeps the list of its `deny.toml`, which already matches §2.
+
+## D-008: Runtime processes are local processes, and report their bound addresses
+
+- Date: 2026-10-11 (task S3).
+- Decision: the controller starts runtimes as local processes (`asyncio` subprocesses). A runtime
+  binds port 0 when no port is imposed, and prints its bound addresses once on standard output, as one
+  JSON line: `{"control_address": ..., "station_address": ...}`, with `station_address` null for a
+  client. Standard error carries the log. Containers come with the Docker adapter (D1).
+- Reason: a controller that gave port 0 cannot learn the port otherwise, and the plan forbids picking a
+  free port on the host beforehand (§6). Parsing the log would couple the controller to a message.
+- Stop: SIGTERM, then a kill after 20 seconds. The station drains its connections for at most five
+  seconds (U1).
+- Test: `tests/integration/test_milestone1.py` starts both runtimes this way and runs the milestone
+  sequence. `tests/unit/test_asdu.py` checks the reader of the answers.

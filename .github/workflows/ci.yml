@@ -98,3 +98,30 @@ jobs:
         with:
           name: runtime-image-id
           path: image-id.txt
+
+  integration:
+    name: Milestone 1 integration (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the OpenSSL development files
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
+
+      - name: Build the runtime
+        working-directory: runtime
+        run: cargo build --locked --package igs-iec104-runtime
+
+      - name: Install uv and Python (from .python-version)
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+
+      - name: Install the locked environment
+        run: uv sync --locked
+
+      - name: Run the integration tests
+        env:
+          IGS_RUNTIME_BINARY: ${{ github.workspace }}/runtime/target/debug/igs-iec104-runtime
+        run: uv run pytest tests/integration
