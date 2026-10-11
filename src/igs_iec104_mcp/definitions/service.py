@@ -38,6 +38,9 @@ CODES: tuple[str, ...] = (
     "stale_revision",
     "invalid_argument",
     "storage_error",
+    "invalid_state",
+    "unsupported",
+    "engine_unavailable",
 )
 DEFAULT_LIMIT: int = 50
 MAX_LIMIT: int = 200

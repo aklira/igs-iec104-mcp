@@ -38,6 +38,8 @@ class Control(Protocol):
 
     async def update_point(self, address: int, value: Any) -> dict[str, Any]: ...
 
+    async def image_points(self) -> dict[str, Any]: ...
+
 
 class Bench(Protocol):
     """The instances of a bench: their control APIs, the clients of each station, and
@@ -108,6 +110,9 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         return await _poll(ended)
 
     async def update_point(step: Any, context: Context) -> str:
+        """The update is complete when the station stores the value and each client of
+        the station holds it in its image. Then a following assertion on the client sees
+        the update, not the value before it."""
         control = bench.control(step.server)
         await control.update_point(step.address, step.value)
 
@@ -119,7 +124,10 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
                 else None
             )
 
-        return await _poll(stored)
+        detail = await _poll(stored)
+        for client in bench.clients_of(step.server):
+            detail += await _wait_image(bench.control(client), client, step)
+        return detail
 
     async def stop_instance(step: Any, context: Context) -> str:
         instance = step.instance
@@ -146,6 +154,19 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         "stop_instance": stop_instance,
         "start_instance": start_instance,
     }
+
+
+async def _wait_image(control: Control, client: str, step: Any) -> str:
+    """Waits until a client's point image holds the value of a point."""
+
+    async def holds() -> str | None:
+        body = await control.image_points()
+        for point in body["points"]:
+            if point["address"] == step.address and point["value"] == step.value:
+                return f"; {client} holds {step.value!r}"
+        return None
+
+    return await _poll(holds)
 
 
 async def _wait_transfer(control: Control, client: str) -> str:

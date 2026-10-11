@@ -1,10 +1,10 @@
-"""The MCP server of the test benches: the definition tools, over stdio.
+"""The MCP server of the test benches: the definition and run tools, over stdio.
 
-Task M1 (IMPLEMENTATION.md §9). Stdout carries the MCP messages and nothing else, so
-the server prints nothing to it: its logs go to stderr. A request that fails is a tool
-error. The SDK puts `Error executing tool <name>: ` in front of its text, and the text
-then starts with the stable error code of the service (`not_found: ...`). The tools are
-thin: the business logic is in `definitions.service`.
+Tasks M1 and M2 (IMPLEMENTATION.md §9). Stdout carries the MCP messages and nothing
+else, so the server prints nothing to it: its logs go to stderr. A request that fails is
+a tool error. The SDK puts `Error executing tool <name>: ` in front of its text, and the
+text then starts with the stable error code of the service (`not_found: ...`). The tools
+are thin: the business logic is in `definitions.service` and `scenarios.runner`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -20,12 +20,23 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from igs_iec104_mcp.definitions import service
 from igs_iec104_mcp.definitions.store import ProjectStore, StoreError
+from igs_iec104_mcp.scenarios.runner import (
+    DockerEngine,
+    EventsOut,
+    NoEngine,
+    Runner,
+    RunOut,
+    RunsOut,
+    run_out,
+)
+from igs_iec104_mcp.storage.runs import RunStore
 
 NAME = "igs-iec104-mcp"
 INSTRUCTIONS = (
-    "Manages the definitions of IEC 60870-5-104 test benches and their scenarios. "
-    "Validate a definition before storing it. An update names the revision it was "
-    "read at. A failed request says its error code first."
+    "Manages the definitions of IEC 60870-5-104 test benches and their scenarios, and "
+    "runs the scenarios on Docker benches. Validate a definition before storing it. An "
+    "update names the revision it was read at. A run is followed with run_get and "
+    "run_events. A failed request says its error code first."
 )
 
 
@@ -37,10 +48,32 @@ def _call[T](request: Callable[[], T]) -> T:
         raise ToolError(str(error)) from error
 
 
-def create_server(project: Path) -> MCPServer:
-    """The server over the project directory. Raises StoreError when the directory does
-    not exist."""
+async def _acall[T](request: Callable[[], Awaitable[T]]) -> T:
+    """Runs an asynchronous request. A failure is a tool error, with its code first."""
+    try:
+        return await request()
+    except service.ServiceError as error:
+        raise ToolError(str(error)) from error
+
+
+def create_server(
+    project: Path,
+    *,
+    runtime_image: str | None = None,
+    relay_image: str | None = None,
+) -> MCPServer:
+    """The server over the project directory. Runs need both images; without them, a run
+    is refused with `engine_unavailable`. Raises StoreError when the directory does not
+    exist."""
     store = ProjectStore(project)
+    runs = RunStore(project)
+    if runtime_image and relay_image:
+        engine: DockerEngine | NoEngine = DockerEngine(
+            image=runtime_image, relay=relay_image
+        )
+    else:
+        engine = NoEngine()
+    runner = Runner(store, runs, engine)
     server = MCPServer(NAME, instructions=INSTRUCTIONS)
 
     @server.tool(
@@ -120,6 +153,58 @@ def create_server(project: Path) -> MCPServer:
             lambda: service.list_names(store, "scenario", limit=limit, cursor=cursor)
         )
 
+    @server.tool(
+        name="scenario_run",
+        description="Start a run of a scenario: its bench starts, the scenario runs, "
+        "and the bench is removed after it. Returns the run at once, running. Follow "
+        "it with run_get and run_events.",
+    )
+    async def scenario_run(name: str) -> RunOut:
+        return run_out(await _acall(lambda: runner.start(name)))
+
+    @server.tool(
+        name="run_get",
+        description="The record of a run: its status, its times, and the counts of its "
+        "event journal.",
+    )
+    def run_get(run_id: str) -> RunOut:
+        return _call(lambda: run_out(runner.get(run_id)))
+
+    @server.tool(
+        name="run_list",
+        description="A page of the runs, in creation order. Pass next_cursor as the "
+        "cursor of the next page.",
+    )
+    def run_list(limit: int = 50, cursor: str | None = None) -> RunsOut:
+        page = _call(lambda: runner.list_runs(limit=limit, cursor=cursor))
+        return RunsOut(
+            items=[run_out(record) for record in page.items],
+            next_cursor=None if page.next_cursor is None else str(page.next_cursor),
+        )
+
+    @server.tool(
+        name="run_events",
+        description="A page of the event journal of a run, in order: its verdicts as "
+        "they are known, and its other events. Pass next_cursor as the cursor of the "
+        "next page.",
+    )
+    def run_events(
+        run_id: str, limit: int = 50, cursor: str | None = None
+    ) -> EventsOut:
+        page = _call(lambda: runner.events(run_id, limit=limit, cursor=cursor))
+        return EventsOut(
+            events=page.events,
+            next_cursor=None if page.next_cursor is None else str(page.next_cursor),
+        )
+
+    @server.tool(
+        name="run_cancel",
+        description="Ask a running run to stop. It ends cancelled once its steps have "
+        "stopped and its cleanup has run.",
+    )
+    async def run_cancel(run_id: str) -> RunOut:
+        return run_out(await _acall(lambda: runner.cancel(run_id)))
+
     return server
 
 
@@ -135,6 +220,14 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="the project directory of the definitions, which must exist",
     )
+    parser.add_argument(
+        "--runtime-image",
+        help="the runtime image of the benches, by its identity (a digest, not a tag)",
+    )
+    parser.add_argument(
+        "--relay-image",
+        help="the relay image of the benches, by its identity (a digest, not a tag)",
+    )
     arguments = parser.parse_args(argv)
     logging.basicConfig(
         stream=sys.stderr,
@@ -142,7 +235,11 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
     try:
-        server = create_server(arguments.project)
+        server = create_server(
+            arguments.project,
+            runtime_image=arguments.runtime_image,
+            relay_image=arguments.relay_image,
+        )
     except StoreError as error:
         print(f"{NAME}: {error}", file=sys.stderr)
         return 2

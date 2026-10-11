@@ -527,6 +527,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: M1, E3, D2.
 - Produce: `scenario_*`, `scenario_run`, `run_*` with asynchronous runs, pagination, and resources for configurations and reports.
 - Done when: the milestone 5 criterion passes with a real MCP client in CI.
+- Done (D-033): the run tools run a scenario on a Docker bench, and `tests/integration/test_mcp_run.py` passes locally on Podman; the CI run confirms it on Docker. Resources for configurations and reports are not in M2 (reports come with R2).
 
 **M3 — Confirmation of operations on external targets**
 - Depends: M2, X1.
@@ -612,7 +613,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | E4 Parallel branches and barriers | [x] |
 | E5 Restart and reconnect primitives | [x] |
 | M1 MCP server over stdio | [x] |
-| M2 Scenario and run tools | [ ] |
+| M2 Scenario and run tools | [x] |
 | M3 Confirmation on external targets | [ ] |
 | M4 Streamable HTTP transport ⛔ | [ ] |
 | X1 External target model and policy | [ ] |

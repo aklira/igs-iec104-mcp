@@ -177,8 +177,10 @@ class Result:
 @dataclass
 class _Ledger:
     """What a run has done so far: its verdicts, the steps in progress by label, the
-    top-level steps it has completed, and how it ended."""
+    top-level steps it has completed, and how it ended. Each verdict goes to the
+    observer, when there is one, as soon as it is known."""
 
+    observer: Callable[[Verdict], None] | None = None
     verdicts: list[Verdict] = field(default_factory=list)
     open: dict[str, Step] = field(default_factory=dict)
     completed: int = 0
@@ -186,6 +188,11 @@ class _Ledger:
     reason: str = ""
     global_deadline: bool = False
     cancelled: bool = False
+
+    def add(self, verdict: Verdict) -> None:
+        self.verdicts.append(verdict)
+        if self.observer is not None:
+            self.observer(verdict)
 
 
 @dataclass(frozen=True)
@@ -203,16 +210,18 @@ async def execute(
     source: Source,
     *,
     cancel: asyncio.Event | None = None,
+    observer: Callable[[Verdict], None] | None = None,
 ) -> Result:
     """Runs the steps of a scenario in order, then its cleanup steps.
 
     Each step has its deadline, the scenario has its global deadline, and a step that
     does not pass stops the run when fail-fast is on. Setting the `cancel` event stops
     the run: the step in progress ends CANCELLED, and the steps after it do not run.
+    The `observer` receives each verdict as it is known.
     """
     machine = RunMachine()
     machine.move(RunStatus.RUNNING)
-    env = _Env(source, handlers, _Ledger())
+    env = _Env(source, handlers, _Ledger(observer=observer))
     ledger = env.ledger
     try:
         async with asyncio.timeout(_seconds(scenario.global_timeout)):
@@ -288,7 +297,7 @@ async def _execute(
     else:
         outcome, detail = await _run_step(step, env, cancel, default_limit)
     env.ledger.open.pop(label, None)
-    env.ledger.verdicts.append(_verdict(label, step, outcome, detail))
+    env.ledger.add(_verdict(label, step, outcome, detail))
     return outcome
 
 
@@ -422,7 +431,7 @@ def _end_open(ledger: _Ledger, prefix: str | None, detail: str) -> None:
         label for label in ledger.open if prefix is None or label.startswith(prefix)
     ]:
         step = ledger.open.pop(label)
-        ledger.verdicts.append(_verdict(label, step, Outcome.TIMED_OUT, detail))
+        ledger.add(_verdict(label, step, Outcome.TIMED_OUT, detail))
 
 
 async def _until_cancelled(

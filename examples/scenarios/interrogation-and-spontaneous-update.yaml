@@ -1,9 +1,14 @@
 # The example of IMPLEMENTATION.md §8, with the point kind written as `kind`, as the definitions name
-# it. The client interrogates, checks the value, the station updates it, and the client observes it.
+# it. The client requests its transfer and interrogates, and checks the value. The station updates
+# the point; the update completes when the client holds the new value, which the client reports as
+# a spontaneous update (cause 3).
 schema_version: 1
 name: interrogation-and-spontaneous-update
 bench: basic-pair
 steps:
+  - action: start_transfer
+    client: client-1
+    timeout: 10s
   - action: wait_transfer_started
     client: client-1
     timeout: 10s
@@ -20,10 +25,11 @@ steps:
     server: server-1
     address: 100
     value: 18.0
-  - action: expect_point
+    timeout: 5s
+  - action: assert_point
     client: client-1
     address: 100
     kind: float
     value: 18.0
     tolerance: 0.001
-    timeout: 2s
+    cause: 3

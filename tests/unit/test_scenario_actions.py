@@ -70,6 +70,14 @@ class FakeControl:
         self.points[address] = value
         return {"value": value}
 
+    async def image_points(self) -> dict[str, Any]:
+        return {
+            "points": [
+                {"address": address, "value": value}
+                for address, value in self.points.items()
+            ]
+        }
+
 
 class FakeBench:
     """The controls of the instances. A stop disconnects the clients of the station,
@@ -224,3 +232,28 @@ async def test_an_update_passes_once_the_station_stores_the_value() -> None:
     assert result.status is RunStatus.PASSED
     assert station.points == {100: 18.0}
     assert result.verdicts[0].detail == f"point 100 of {STATION} stores 18.0"
+
+
+async def test_an_update_waits_until_the_connected_client_holds_the_value() -> None:
+    station = FakeControl()
+    client = FakeControl()
+    bench = FakeBench({STATION: station, CLIENT: client}, {STATION: [CLIENT]})
+
+    async def observe_later() -> None:
+        await asyncio.sleep(0.1)
+        client.points[100] = 18.0
+
+    observing = asyncio.create_task(observe_later())
+    result = await run(
+        bench,
+        {
+            "action": "update_point",
+            "server": STATION,
+            "address": 100,
+            "value": 18.0,
+            "timeout": "2s",
+        },
+    )
+    await observing
+    assert result.status is RunStatus.PASSED
+    assert result.verdicts[0].detail.endswith(f"; {CLIENT} holds 18.0")

@@ -643,3 +643,45 @@ test can show it.
   the journal's order, its canonical lines, the fields the store owns, the bound and the dropped count, a run that has
   ended, the artifacts with their digest, their names and their size, unknown runs and artifacts, the pages, a page
   size out of range, the records after a reopen, and a store written by a newer version).
+
+## D-033: The scenario run tools and the Docker runs (M2)
+
+- Date: 2026-10-11 (task M2).
+- Decision: five tools run and follow the scenarios: `scenario_run(name)` returns the run at once, running; `run_get`,
+  `run_list`, `run_events` (a page of the journal, with a cursor), and `run_cancel`. The `scenarios/runner.py` module
+  carries them: a run validates its scenario against its bench, refuses a cleanup policy it does not carry out, takes the
+  snapshot (§5), creates the run record (R1), starts the bench through the D2 lifecycle with its containers owned by the
+  run, runs the scenario in a task of the server's loop, and removes the bench afterwards, whatever the outcome. The run
+  ends with a status and a reason, recorded in the journal and in the run store.
+- Journal: each verdict is journaled as it is known (`verdict` events, through a new `observer` of the engine's
+  `execute`), then `stopped` (or `error` when the bench does not stop cleanly) and `ended` with the status and the
+  reason. A cancel request is journaled as `cancel_requested`.
+- Engine: no bench runs without its images. The server takes `--runtime-image` and `--relay-image` by identity (a digest,
+  as §6 requires); without them a run is refused with `engine_unavailable`. Before a run, the engine checks the engine
+  answers and both images are present by identity.
+- Cleanup policy: only `success_and_failure` (with `keep_evidence: true`) is carried out. Other policies are refused with
+  `unsupported`, rather than leaving containers running without an owner.
+- Execution time: the shortest `execution_seconds` of the bench's instances is enforced by the runner: when it passes,
+  the run is cancelled and the journal records the limit (an `error` event). This closes the part of D2's deferral that
+  the caller owns; the engine itself keeps no clock.
+- Actions on a managed bench: the actions read and call each instance through its control API. The actions that
+  restart an instance (`stop_instance`, `start_instance`) are refused as errors, since a restart of a managed instance
+  needs a fixed station port in the plan (D2, as in D-030).
+- Changes to existing parts: the engine's `execute` takes an observer; an update (`update_point`) is complete only when
+  each client connected to the station holds the new value in its image, since a spontaneous update could be recorded
+  before the cursor of a following `expect_point`. The example scenario therefore checks the value and its cause (3)
+  with `assert_point`, and it requests the client's transfer first (`start_transfer`), which the library does not start
+  by itself (D-030). The error codes gain `invalid_state`, `unsupported`, and `engine_unavailable`.
+- Not in M2: the resources for configurations and reports (the reports come with R2); the bench and instance tools of §9
+  (`bench_start`, `bench_stop`, `bench_destroy`, `instance_get`, `instance_logs`) because the runs manage their benches;
+  reconciliation of runs left running by a restart (D3); external targets (X1 and M3); Streamable HTTP (M4).
+- Milestone 5 criterion: `tests/integration/test_mcp_run.py` — a real MCP client creates the bench and the scenario,
+  runs the example scenario on a Docker bench, follows the run to `passed` (six verdicts, journaled), lists the run, and
+  finds the bench's containers removed. It passes locally on Podman with the runtime and relay images built from the
+  repository. The CI integration job runs it on Docker; that check is confirmed when the commit is pushed.
+- Tests: `tests/unit/test_scenario_runner.py` (10 tests against a fake engine: a run passes and journals its verdicts
+  before its end; a bench that does not start or does not stop makes the run an error; a cancelled run ends cancelled and
+  removes its bench; a cleanup policy the run does not carry out is refused; no engine refuses the run; an unknown
+  scenario is not found; a cancel of an ended run is an invalid state; a bad cursor is refused; the journal is paged);
+  `tests/unit/test_scenario_actions.py` (the update waits for the connected client); `tests/integration/test_mcp_stdio.py`
+  (the fourteen tools are listed).

@@ -26,6 +26,11 @@ TOOLS = {
     "scenario_update",
     "scenario_get",
     "scenario_list",
+    "scenario_run",
+    "run_get",
+    "run_list",
+    "run_events",
+    "run_cancel",
 }
 
 

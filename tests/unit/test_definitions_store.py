@@ -201,12 +201,13 @@ def test_a_snapshot_is_unaffected_by_a_later_edit(store: ProjectStore) -> None:
     run_id = new_run_id()
     taken = store.snapshot_run(run_id, "basic-pair", SCENARIO_NAME)
 
-    edited = SCENARIO_TEXT.replace("timeout: 2s", "timeout: 3s")
+    edited = SCENARIO_TEXT.replace("    cause: 3\n", "    cause: 20\n")
+    assert edited != SCENARIO_TEXT
     store.write("scenario", SCENARIO_NAME, edited, expected=scenario.revision)
 
     read = store.read_snapshot(run_id)
     assert read == taken
-    assert read.scenario["steps"][-1]["timeout"] == "2s"
+    assert read.scenario["steps"][-1]["cause"] == 3
     assert store.read("scenario", SCENARIO_NAME).text == edited
 
 
