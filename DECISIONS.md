@@ -731,3 +731,13 @@ test can show it.
   relay's arguments; a duplicate host port refused; the ports the engine is asked for); `tests/integration/test_docker_publish.py`
   (a runtime on the host connects to the advertised endpoint, starts its transfer, interrogates, reads 12.5, the bench is
   removed, and the stop is graceful). The whole integration suite passes on Podman (24 tests).
+
+## D-036: X2 closed on the Linux result
+
+- Date: 2026-10-11 (task X2, closed after the commit of D-035).
+- Decision: the user accepts the Linux check (Podman on WSL2, `tests/integration/test_docker_publish.py`) as the
+  done-when of X2 for now. The box is ticked. The Docker Desktop and WSL check is not dropped: it is recorded as an
+  open item of the platform matrix (V4), to be run on a machine that has Docker Desktop before a release.
+- Why: Docker Desktop is not available on the development machine, and the publication path (the relay on the control
+  network, the host port, the advertised endpoint) is the same engine API on both platforms.
+- Not changed: the plan text of X2 still names both platforms. The status line in IMPLEMENTATION.md §4 says what is done.

@@ -549,7 +549,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 **X2 — Published server endpoints**
 - Depends: D2.
 - Done when: a client outside Docker reaches a managed server at the advertised endpoint on Linux and on Docker Desktop/WSL.
-- Status (D-035): the Linux check passes on Podman (WSL2 host); the Docker Desktop and WSL check is open, so the box stays unticked until the platform decision.
+- Done (D-036): the Linux check passes on Podman (WSL2 host). The Docker Desktop and WSL check is an open item of the platform matrix (V4), as the user decided.
 
 **X3 — Interoperability against an independent implementation** ⛔
 - Depends: X1, X2, M2.
@@ -619,7 +619,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | M3 Confirmation on external targets | [ ] |
 | M4 Streamable HTTP transport ⛔ | [ ] |
 | X1 External target model and policy | [x] |
-| X2 Published server endpoints | [ ] |
+| X2 Published server endpoints | [x] |
 | X3 Interoperability, independent implementation ⛔ | [ ] |
 | R1 Run store | [x] |
 | R2 Reports | [ ] |
