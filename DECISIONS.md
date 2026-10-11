@@ -229,8 +229,8 @@ test can show it.
   network name or the instance name. The name is checked against the name pattern and at most 63
   characters. Ownership is decided by the labels, not by the name.
 - Hardening: a container spec has no field for a volume, a bind, a port, a privilege, the host network, or an
-  extra capability. Every container is created read-only, privileged false, with all capabilities dropped and
-  `no-new-privileges`. Its memory, CPUs, and processes are bounded by `Limits`.
+  extra capability. Every container is created unprivileged, with all capabilities dropped and
+  `no-new-privileges` (its root filesystem is writable: see D-016). Its memory, CPUs, and processes are bounded by `Limits`.
 - Images: a container is created from the image identity (`sha256:...`), never from a tag. A repository
   digest is resolved on the engine and checked against the image's repo digests; a tag is refused before any
   call.
@@ -308,3 +308,9 @@ test can show it.
 - Test: `tests/unit/test_scenario_engine.py` (ordering, a stale observation before the cursor, a step deadline,
   the global deadline during a step, fail-fast on and off, an action with no handler, an unexpected error, the
   run states, a step without a deadline).
+- Correction 2: the root filesystem of a runtime is writable. The engine refuses an archive copy into a
+  container whose root is read-only ("container rootfs is marked read-only", seen in the CI run of 72daafc),
+  while Podman accepted it, so the files of a run need a writable container. The other hardening stays: the
+  runtime's non-root user, no privilege, all capabilities dropped, `no-new-privileges`, the resource limits,
+  and no bind, volume, or socket. A read-only root with the files in a volume is a later option, to check on
+  Docker before it is used.

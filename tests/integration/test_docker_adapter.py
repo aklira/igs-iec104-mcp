@@ -114,7 +114,7 @@ async def test_a_container_is_created_with_the_hardening_of_the_spec(
 
     host = raw_client().containers.get(container.identity).attrs["HostConfig"]
     assert host["Privileged"] is False
-    assert host["ReadonlyRootfs"] is True
+    assert not host.get("ReadonlyRootfs")  # the root is writable: see D-016
     assert not host.get("Binds")
     assert host["Memory"] == 64 * 1024 * 1024
     assert host["PidsLimit"] == 64

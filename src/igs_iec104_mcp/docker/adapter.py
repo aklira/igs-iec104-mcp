@@ -282,7 +282,6 @@ class DockerAdapter:
             labels=ownership.labels(instance=spec.instance),
             network=network,
             command=list(spec.arguments) or None,
-            read_only=True,
             privileged=False,
             cap_drop=["ALL"],
             security_opt=list(SECURITY_OPTIONS),
