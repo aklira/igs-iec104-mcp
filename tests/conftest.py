@@ -1,7 +1,9 @@
-"""Fixtures shared by the tests: the contracts, and the runtime binary."""
+"""Fixtures shared by the tests: the contracts, the runtime binary, and the Docker
+engine."""
 
 import json
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,8 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 from ruamel.yaml import YAML
+
+from igs_iec104_mcp.docker.adapter import DockerAdapter, DockerError
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
@@ -108,3 +112,19 @@ def runtime_binary() -> Path:
     path = Path(value)
     assert path.is_file(), f"{path} is not a file"
     return path
+
+
+@pytest.fixture
+async def adapter() -> AsyncIterator[DockerAdapter]:
+    """A Docker engine for the integration tests. Tests skip without one, except in CI,
+    where a missing engine fails the run. Podman's Docker-compatible socket works too:
+    `DOCKER_HOST=unix:///run/user/<uid>/podman/podman.sock`."""
+    try:
+        engine = DockerAdapter.connect()
+        await engine.ping()
+    except DockerError as error:
+        message = f"no Docker engine for the integration tests: {error}"
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        pytest.skip(message)
+    yield engine

@@ -19,10 +19,23 @@
 ## Q-002: point kinds of the definitions and of the runtime
 
 - Task: C4. Status: open, for the maintainer.
-- Question: the definitions accept the eleven monitoring kinds of the upstream `PointValue` (§5), but the
+- Question: the definitions accept the ten monitoring kinds of the upstream `PointValue` (§5), but the
   runtime serves five of them today (single, double, normalized, scaled, and float). A bench that uses
   step, bitstring, counter, packed, or normalized-unqualified points is valid, and fails when the runtime
   is asked to serve it. Should the definitions accept only the kinds the runtime serves until each is
-  implemented, or accept all eleven now, with the runtime refusing the rest by name at start?
-- Effect until decided: the definitions accept all eleven. The runtime refuses the others when it starts
-  (task D2 for the bench lifecycle, where a definition is turned into runtime configuration).
+  implemented, or accept all ten now, with the runtime refusing the rest by name at start?
+- Effect until decided: the definitions accept all ten. Since D2, the plan of a bench refuses the five
+  kinds the runtime does not serve, by name, before any resource is created (`docker/plan.py`); the question
+  of which of the two behaviours to keep remains open.
+
+## Q-003: link parameters of the runtimes
+
+- Task: D2. Status: open, for the maintainer.
+- Question: the definitions carry the link parameters of each instance (t0 to t3, k, w), but the runtime takes
+  no flag for them: it uses the upstream defaults (§9.6). Should the runtime gain flags for the link
+  parameters (a change of the runtime and of its contract, so a separate task), or should a bench keep to
+  the defaults until then?
+- Effect until decided: a bench whose instance sets a link parameter other than its default is refused at
+  plan time, naming the parameters (`docker/plan.py`). The defaults of the model equal the upstream defaults
+  (`igs-iec104-link`, `Parameters::default`).
+

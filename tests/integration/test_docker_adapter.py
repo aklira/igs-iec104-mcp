@@ -7,7 +7,6 @@ The tests pull one small image by its digest. Without an engine they skip, excep
 where a missing engine fails the run. Podman's Docker-compatible socket works too:
 `DOCKER_HOST=unix:///run/user/<uid>/podman/podman.sock`."""
 
-import os
 import secrets
 from collections.abc import AsyncIterator
 from typing import Any
@@ -19,7 +18,6 @@ from docker import from_env  # type: ignore[attr-defined]
 from igs_iec104_mcp.docker.adapter import (
     Conflict,
     DockerAdapter,
-    DockerError,
     ImageError,
 )
 from igs_iec104_mcp.docker.labels import INSTANCE, Ownership
@@ -35,22 +33,6 @@ IMAGE = (
     "f97baa533a26513c453a362be331a43eb60214302f449c16571b23cea141dce4"
 )
 UNKNOWN_DIGEST = "docker.io/library/busybox@sha256:" + "0" * 64
-
-
-@pytest.fixture
-async def adapter() -> AsyncIterator[DockerAdapter]:
-    try:
-        engine = DockerAdapter.connect()
-        await engine.ping()
-    except DockerError as error:
-        message = f"no Docker engine for the integration tests: {error}"
-        if os.environ.get("CI"):
-            pytest.fail(message)
-        pytest.skip(message)
-    client = from_env()
-    if not _has_image(client, IMAGE):
-        client.images.pull(IMAGE)
-    yield engine
 
 
 def _has_image(client: Any, reference: str) -> bool:

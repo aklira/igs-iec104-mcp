@@ -85,7 +85,7 @@ def test_an_image_named_by_a_digest_is_accepted(image: str) -> None:
 
 def test_a_container_has_no_field_for_a_mount_a_privilege_or_a_capability() -> None:
     names = {field.name for field in dataclasses.fields(ContainerSpec)}
-    assert names == {"instance", "image", "network", "limits"}
+    assert names == {"instance", "image", "network", "limits", "arguments"}
     with pytest.raises(TypeError):
         ContainerSpec(  # type: ignore[call-arg]
             instance="client-1", image=DIGEST, network="lan", privileged=True

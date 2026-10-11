@@ -188,7 +188,7 @@ test can show it.
   number of seconds of at least 1, k and w from 1 to 32767); a timeout is above zero and at most an hour
   for a step, and a day for a whole scenario; a secret is named as `secret:<name>` and key material is
   never written in a definition; a scenario action outside the list is refused with the list.
-- Point kinds: the eleven monitoring kinds of the upstream `PointValue` names are accepted, with the forms
+- Point kinds: the ten monitoring kinds of the upstream `PointValue` are accepted, with the forms
   of their values; the runtime serves five of them today (see Q-002).
 - The plan's example (§8) writes `type:` for a point; the definitions write `kind:`, as the point model does.
 - Test: `tests/unit/test_models_*.py` (each rejection of §5, with its message), and
@@ -245,3 +245,37 @@ test can show it.
   hardening read back from the engine; an unlabelled resource with the same name is refused and kept; another
   run's resources are kept; a failed creation is rolled back; the digest checks). The integration tests pull
   one small image by its digest and fail in CI without an engine.
+
+## D-016: The test bench lifecycle
+
+- Date: 2026-10-11 (task D2).
+- Decision: a bench starts in this order: the networks, each station (create, copy its files, start, ready),
+  then each client (create, copy its files, start, ready, connected). The control API of each runtime listens
+  on port 8080 inside its container, and the engine publishes it on 127.0.0.1 at a port it picks; the
+  controller reads that port back. A station listens on port 0 and reports the port it bound. A client is
+  given its station's address on their network (the container address the engine reports, and the bound port);
+  the runtime takes IP addresses, not container names.
+- Files: the control token and the points are copied into the container with the engine's archive
+  interface, into an in-memory directory (`/run/igs`, `mode=0755`). They are owned by the runtime's user
+  (UID 10001, fixed in `docker/runtime.Dockerfile`) and read only by it (mode 0400). They are never in the
+  environment, a bind mount, or the evidence. The controller writes the token to a temporary directory
+  outside the project, which is removed when the start ends.
+- Plan: a bench is planned before anything is created. The plan refuses, by name: a point kind the runtime
+  does not serve (Q-002); link parameters other than the defaults (Q-003); a connection that reaches an
+  external target (task X1); a connection whose ends are not on one network; a client without exactly one
+  connection. Every problem is reported at once.
+- Evidence: a manifest (the bench, the run, the requested image, its resolved identity, the networks and the
+  runtimes) is written at the start. Each runtime's logs and record are kept when it stops, and the logs and
+  record of each container of a failed start are kept before the rollback. `stop.json` records each exit code
+  and whether the stop was graceful (status 0 after SIGTERM).
+- Rollback: a failure at any step removes the resources the start created, through the creation block of D1.
+  The checkpoint of each step is a test hook; the test injects a failure at every step.
+- Not in D2: the cleanup policy (`CleanupPolicy`) and the execution time limit (`execution_seconds`) are read
+  by the caller (the scenario engine, E3); external connectivity and published station ports come with X1.
+- Tests: `tests/unit/test_docker_plan.py` (each refusal and the plan of the basic pair);
+  `tests/integration/test_docker_bench.py` (the basic pair comes up, stops gracefully, and keeps its evidence
+  without the token; a failure at each step leaves no owned resource; two benches run side by side; a plan
+  that does not run creates nothing). The integration tests need the runtime image, named by
+  `IGS_RUNTIME_IMAGE`; the CI integration job builds it.
+- Correction: the earlier records (C4, D-013, Q-002) said eleven point kinds. The upstream `PointValue` has
+  ten variants; the unserved kinds are step, bitstring, counter, packed, and normalized-unqualified.

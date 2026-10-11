@@ -10,6 +10,8 @@ else."""
 from __future__ import annotations
 
 import asyncio
+import io
+import tarfile
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -22,7 +24,11 @@ from docker.errors import APIError, DockerException, NotFound
 from docker import from_env  # type: ignore[attr-defined]
 from igs_iec104_mcp.docker.labels import INSTANCE, Ownership, owns
 from igs_iec104_mcp.docker.specs import (
+    CONTROL_PORT,
     IMAGE_PATTERN,
+    RUN_DIRECTORY,
+    RUN_DIRECTORY_OPTIONS,
+    RUNTIME_UID,
     SECURITY_OPTIONS,
     ContainerSpec,
     NetworkSpec,
@@ -169,6 +175,45 @@ class DockerAdapter:
         except (APIError, DockerException, OSError) as error:
             raise DockerError(f"the Docker engine failed: {error}") from error
 
+    async def put_files(self, resource: Resource, files: dict[str, bytes]) -> None:
+        """Copies files into the run directory of a created container, before it
+        starts. Each file is readable by the runtime's user alone. A name is a plain
+        file name."""
+        for name in files:
+            if not name or "/" in name or name in {".", ".."}:
+                raise DockerError(f"{name!r} is not a plain file name")
+        await self._call(partial(self._put_files, resource, files))
+
+    async def start_container(self, resource: Resource) -> None:
+        await self._call(self._container(resource).start)
+
+    async def stop_container(self, resource: Resource, grace: int) -> None:
+        """Stops a container: SIGTERM, then SIGKILL after `grace` seconds."""
+        await self._call(partial(self._container(resource).stop, timeout=grace))
+
+    async def inspect(self, resource: Resource) -> dict[str, Any]:
+        """The engine's record of a container: its state, ports, and networks."""
+        return await self._call(lambda: dict(self._container(resource).attrs))
+
+    async def logs(self, resource: Resource) -> bytes:
+        return await self._call(
+            lambda: bytes(self._container(resource).logs(stdout=True, stderr=True))
+        )
+
+    def _container(self, resource: Resource) -> Any:
+        return self._client.containers.get(resource.identity)
+
+    def _put_files(self, resource: Resource, files: dict[str, bytes]) -> None:
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            for name, data in files.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                info.mode = 0o400
+                info.uid = info.gid = RUNTIME_UID
+                archive.addfile(info, io.BytesIO(data))
+        self._container(resource).put_archive(RUN_DIRECTORY, buffer.getvalue())
+
     def _image_id(self, reference: str) -> str:
         try:
             image = self._client.images.get(reference)
@@ -237,6 +282,7 @@ class DockerAdapter:
             name=name,
             labels=ownership.labels(instance=spec.instance),
             network=network,
+            command=list(spec.arguments) or None,
             read_only=True,
             privileged=False,
             cap_drop=["ALL"],
@@ -244,6 +290,8 @@ class DockerAdapter:
             mem_limit=spec.limits.memory_bytes,
             nano_cpus=round(spec.limits.cpus * 1_000_000_000),
             pids_limit=spec.limits.pids,
+            ports={f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)},
+            tmpfs={RUN_DIRECTORY: RUN_DIRECTORY_OPTIONS},
         )
         return Resource("container", str(container.id), name), True
 

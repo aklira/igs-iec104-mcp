@@ -573,7 +573,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | C4 Definition models and YAML schemas | [x] |
 | C5 Definition storage | [x] |
 | D1 Docker adapter and labels | [x] |
-| D2 Test bench lifecycle | [ ] |
+| D2 Test bench lifecycle | [x] |
 | D3 Reconciliation | [ ] |
 | E1 Steps, cursors, run state machine | [ ] |
 | E2 Assertions | [ ] |

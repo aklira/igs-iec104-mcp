@@ -10,13 +10,14 @@ WORKDIR /src
 COPY . .
 RUN cargo build --locked --release --package igs-iec104-runtime
 
-# Run on a minimal image with the OpenSSL runtime library, as a non-root user.
+# Run on a minimal image with the OpenSSL runtime library, as a non-root user with a fixed identity
+# (10001), which the controller's in-memory run directory is owned by (docker/specs.py).
 FROM debian:trixie-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libssl3t64 \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system runtime \
-    && useradd --system --gid runtime --no-create-home --shell /usr/sbin/nologin runtime
+    && groupadd --system --gid 10001 runtime \
+    && useradd --system --uid 10001 --gid runtime --no-create-home --shell /usr/sbin/nologin runtime
 COPY --from=build /src/target/release/igs-iec104-runtime /usr/local/bin/igs-iec104-runtime
 USER runtime
 ENTRYPOINT ["/usr/local/bin/igs-iec104-runtime"]

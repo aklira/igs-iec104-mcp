@@ -26,6 +26,15 @@ MIN_MEMORY = 16 * 1024 * 1024
 MAX_PIDS = 4096
 MAX_CPUS = 64.0
 MIN_PIDS = 16
+# The runtime's control API listens on this port inside its container. The engine
+# publishes it on 127.0.0.1 at a port it picks, which the controller reads back (D2).
+CONTROL_PORT = 8080
+# The directory of the runtime's files (its control token and its points). It is an
+# in-memory mount, owned by the runtime's user, so no file of a run is on the host disk.
+RUN_DIRECTORY = "/run/igs"
+RUNTIME_UID = 10001
+# The files in it are owned by the runtime's user and readable by it alone (mode 0400).
+RUN_DIRECTORY_OPTIONS = "size=1m,mode=0755"
 # The runtime is hardened by default: no privilege escalation, with the read-only root
 # filesystem and the dropped capabilities set in the container spec.
 SECURITY_OPTIONS = ("no-new-privileges:true",)
@@ -74,14 +83,16 @@ class NetworkSpec:
 
 @dataclass(frozen=True)
 class ContainerSpec:
-    """A runtime container: its instance, its image, its network (by name in the bench),
-    and its limits. It has no volumes, no ports, and no privilege: those are added only
-    by a later task, with a reason."""
+    """A runtime container: its instance, its image, its network (by name in the
+    bench), its limits, and the arguments of the runtime. It has no bind mount, no
+    privilege, and no port but the control port: the only writable path is the
+    in-memory directory `RUN_DIRECTORY`."""
 
     instance: str
     image: str
     network: str
     limits: Limits = field(default_factory=Limits)
+    arguments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         check_plain_name(self.instance, "instance")
@@ -102,6 +113,15 @@ def check_plain_name(name: str, what: str) -> None:
         raise SpecError(f"the {what} name: {error}") from error
     if len(name) > MAX_NAME_LENGTH:
         raise SpecError(f"the {what} name {name!r} is longer than {MAX_NAME_LENGTH}")
+
+
+def part_of(name: str) -> str:
+    """The part of a resource name that `resource_name` built: the instance or the
+    network. Raises SpecError for a name the controller did not build."""
+    prefix, run, part = [*name.split("-", 2), "", ""][:3]
+    if prefix != "igsmcp" or len(run) != 12 or not part:
+        raise SpecError(f"{name!r} is not a name of this controller")
+    return part
 
 
 def resource_name(ownership: Ownership, part: str) -> str:
