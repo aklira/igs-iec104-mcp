@@ -56,7 +56,7 @@ Desktop, with the same test suite, before a release.
 | Confirmation of state-changing operations | supported | MCP elicitation; a reviewed opt-in when the client cannot be asked |
 | Run records, reports, retention | supported and tested | JSON, JUnit XML, Markdown |
 | Recovery after a server crash | supported | the run is `interrupted`; its bench is listed and removed by its run |
-| Streamable HTTP transport | **not implemented** | stdio only; the HTTP transport waits for a maintainer's review (M4) |
+| Streamable HTTP transport | supported on the loopback, with a token | `--transport http`; no remote listener and no TLS yet (see [setup](setup.md#http-transport)) |
 | Controlled faults (interruption, latency) | **not implemented** | waits for a maintainer's approval of the component (V3) |
 | Interoperability with an independent implementation | **not done** | waits for a maintainer's decision (X3) |
 
@@ -90,7 +90,7 @@ generic path, which the scenarios do not use.
 The release is gated on these items, in this order:
 
 1. The Docker Desktop checks above, on a machine with Docker Desktop.
-2. The remaining tasks of the plan: M4 (Streamable HTTP), X3 (interoperability), and V3 (controlled faults). Each
+2. The remaining tasks of the plan: X3 (interoperability), and V3 (controlled faults). Each
    needs a maintainer's decision first.
 3. A review of this matrix and of the limitations by a maintainer, and of the licences (`scripts/check_licences.py`
    and `cargo deny`).

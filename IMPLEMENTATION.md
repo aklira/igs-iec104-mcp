@@ -540,6 +540,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: M2.
 - Produce: the HTTP transport with authentication and access control.
 - Done when: a maintainer has reviewed the authentication design and the exposure.
+- Done (D-048): the maintainer approved the scope (loopback only, one bearer token, no remote listener and no OAuth). The HTTP transport runs with `--transport http` on 127.0.0.1, localhost, or ::1, and every request needs the token.
 
 ### Phase X — External interoperability (milestone 6)
 
@@ -624,7 +625,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | M1 MCP server over stdio | [x] |
 | M2 Scenario and run tools | [x] |
 | M3 Confirmation on external targets | [x] |
-| M4 Streamable HTTP transport ⛔ | [ ] |
+| M4 Streamable HTTP transport ⛔ | [x] |
 | X1 External target model and policy | [x] |
 | X2 Published server endpoints | [x] |
 | X3 Interoperability, independent implementation ⛔ | [ ] |

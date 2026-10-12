@@ -66,8 +66,9 @@ See [runs and artifacts](runs-and-artifacts.md#secrets) for the rules.
 
 ## Start the server
 
-The server speaks MCP over stdio: it is started by an MCP client, not run in a terminal. Its standard output
-carries the MCP messages only, and its diagnostics go to standard error.
+By default the server speaks MCP over stdio: it is started by an MCP client, not run in a terminal. Its standard
+output carries the MCP messages only, and its diagnostics go to standard error. The HTTP transport is the other
+option; see [HTTP transport](#http-transport).
 
 Check the options from the repository:
 
@@ -84,8 +85,45 @@ PYTHONPATH=src .venv/bin/python -m igs_iec104_mcp --help
 | `--keep-runs N` | keep the newest N ended runs; `run_prune` removes the others |
 | `--keep-days D` | keep the runs that ended within D days; `run_prune` removes the older ones |
 | `--max-events N` | the events a run's journal keeps before it counts drops |
+| `--transport stdio\|http` | `stdio` (the default), or `http`: Streamable HTTP on the loopback, with a token |
+| `--http-port PORT` | the port of the HTTP transport, required with `--transport http`; the server does not choose one |
+| `--http-token-file FILE` | the file with the bearer token, required with `--transport http` |
+| `--http-host ADDRESS` | `127.0.0.1` (the default), `localhost`, or `::1`; no other address is accepted |
 
 The definition tools work without the images. Running a scenario needs both images and a reachable engine.
+
+## HTTP transport
+
+Use the HTTP transport when a client on the same machine cannot start the server itself. It listens on the loopback
+only, and every request must carry the token in an `Authorization: Bearer` header.
+
+Create the token, and keep it in a file that only you can read, outside the project:
+
+```bash
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > ~/igs-mcp-token
+chmod 600 ~/igs-mcp-token
+```
+
+Start the server, on a port you choose:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m igs_iec104_mcp --project ~/igs-project \
+  --transport http --http-port 8765 --http-token-file ~/igs-mcp-token
+```
+
+The MCP endpoint is `http://127.0.0.1:8765/mcp`. The server logs its address to standard error, never the token.
+
+What the transport checks, and what it does not:
+
+- A request without the token, or with another token, is refused with `401`.
+- A request whose `Host` is not the listener's own name is refused with `421`, and one whose `Origin` is not the
+  listener's own is refused with `403`. This is the protection against a web page that rebinds a name to the loopback.
+- The token file must be owner-only, must not be a symbolic link, must be outside the project, and must hold 32 to 256
+  printable characters. An error names the rule, never the token.
+- There is no remote listener and no TLS. A host other than the loopback is refused at start. A remote listener needs
+  TLS and an authorization server, which is a separate decision.
+- The token is the only credential. The server publishes protected-resource metadata that names itself as the issuer,
+  since it runs no authorization server: a client is given the token out of band.
 
 ## Connect an MCP client
 

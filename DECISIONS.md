@@ -1075,3 +1075,28 @@ test can show it.
   - The package has no console script: the server starts with `python -m igs_iec104_mcp` from the source tree.
   - `send_command` to a managed instance is unsupported; to an external target it is confirmed and then unsupported.
 - Not in this part: the Docker Desktop and WSL check, the macOS check, and the matrix's final review.
+
+## D-048: The HTTP transport on the loopback, with one bearer token (M4)
+
+- Date: 2026-10-12 (task M4). The maintainer approved the scope on 2026-10-12 (loopback and one token, not OAuth): that
+  approval is the review that M4's done-when asks for.
+- Decision: `--transport http` serves Streamable HTTP through the SDK, at `/mcp`, on the loopback. The listener is
+  `127.0.0.1`, `localhost`, or `::1`; no other address is accepted, so there is no remote listener and no TLS. The port is
+  given with `--http-port`; the server does not choose one. The token is given with `--http-token-file`.
+- Authentication: the SDK's token verifier with one token. The comparison is constant-time (`hmac.compare_digest`). A
+  request without the token, or with another one, gets `401`. The token file is read at start: it must be owner-only,
+  not a symbolic link, outside the project, and hold 32 to 256 printable characters. Errors name the rule, never the
+  token; the token is not logged, and the settings do not show it in their representation.
+- Exposure: the SDK's DNS rebinding protection is set to the listener's own names and port. A `Host` that is not one of
+  them gets `421`; an `Origin` that is not one of them gets `403`.
+- Design detail: the SDK requires an issuer for its authorization settings. The server runs no authorization server, so
+  the issuer is the server itself. `validate_token_resource` is false, because the one token is the server's own and has
+  no resource indicator. A client is given the token out of band.
+- Not decided here: a remote listener (it needs TLS, which the SDK's run path does not take, and an authorization
+  server); OAuth; a per-tool authorization. Each is a separate decision.
+- Dependencies: none new. `uvicorn` is used by the SDK's own run path and is not imported here.
+- Tests: `tests/unit/test_transport.py` (18 tests): the token file rules on real files; the loopback and the port; the
+  token's absence from the settings' representation; the verifier; the HTTP application in process (no token gets
+  `401`, a foreign `Host` gets `421`, a foreign `Origin` gets `403`, the right token gets the initialize result and the 19
+  tools); the command line's refusals. A real run on a port, checked with curl: `401` without the token, `200` with it,
+  `421` for a foreign host, and the token absent from the server's log.

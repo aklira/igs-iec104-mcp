@@ -1,10 +1,12 @@
-"""The MCP server of the test benches: the definition and run tools, over stdio.
+"""The MCP server of the test benches: the definition and run tools, over stdio or over
+Streamable HTTP on the loopback with a bearer token.
 
-Tasks M1 and M2 (IMPLEMENTATION.md §9). Stdout carries the MCP messages and nothing
-else, so the server prints nothing to it: its logs go to stderr. A request that fails is
-a tool error. The SDK puts `Error executing tool <name>: ` in front of its text, and the
-text then starts with the stable error code of the service (`not_found: ...`). The tools
-are thin: the business logic is in `definitions.service` and `scenarios.runner`.
+Tasks M1, M2 and M4 (IMPLEMENTATION.md §9). Over stdio, stdout carries the MCP messages
+and nothing else, so the server prints nothing to it: its logs go to stderr. A request
+that fails is a tool error. The SDK puts `Error executing tool <name>: ` in front of its
+text, and the text then starts with the stable error code of the service
+(`not_found: ...`). The tools are thin: the business logic is in `definitions.service`
+and `scenarios.runner`.
 """
 
 from __future__ import annotations
@@ -38,6 +40,14 @@ from igs_iec104_mcp.scenarios.runner import (
 )
 from igs_iec104_mcp.storage.retention import RetentionPolicy
 from igs_iec104_mcp.storage.runs import DEFAULT_MAX_EVENTS, RunStore
+from igs_iec104_mcp.transport import (
+    PATH,
+    HttpSettings,
+    TokenError,
+    read_token,
+    server_options,
+    transport_security,
+)
 
 NAME = "igs-iec104-mcp"
 INSTRUCTIONS = (
@@ -72,11 +82,13 @@ def create_server(
     retention: RetentionPolicy | None = None,
     max_events: int = DEFAULT_MAX_EVENTS,
     secrets_dir: Path | None = None,
+    http: HttpSettings | None = None,
 ) -> MCPServer:
     """The server over the project directory. Runs need both images; without them, a
     run is refused with `engine_unavailable`. The retention policy, when there is one,
-    is what `run_prune` removes by; `max_events` bounds each run's journal. Raises
-    StoreError when the directory does not exist."""
+    is what `run_prune` removes by; `max_events` bounds each run's journal. `http`, when
+    given, makes the server require its token on the HTTP transport. Raises StoreError
+    when the directory does not exist."""
     store = ProjectStore(project)
     runs = RunStore(project, max_events=max_events)
     secrets = None
@@ -94,7 +106,7 @@ def create_server(
         logging.getLogger(NAME).warning(
             "marked %d run(s) interrupted: %s", len(interrupted), ", ".join(interrupted)
         )
-    server = MCPServer(NAME, instructions=INSTRUCTIONS)
+    server = MCPServer(NAME, instructions=INSTRUCTIONS, **server_options(http))
 
     @server.tool(
         name="bench_validate",
@@ -291,10 +303,12 @@ def create_server(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Runs the server over stdio, until its client closes the connection."""
+    """Runs the server over stdio, until its client closes the connection; or over the
+    HTTP transport, on the loopback, until it is stopped."""
     parser = argparse.ArgumentParser(
         prog=NAME,
-        description="The MCP server of the IEC 60870-5-104 test benches, over stdio.",
+        description="The MCP server of the IEC 60870-5-104 test benches: over stdio, "
+        "or over Streamable HTTP on the loopback with a bearer token.",
     )
     parser.add_argument(
         "--project",
@@ -332,17 +346,51 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MAX_EVENTS,
         help="the events a run's journal keeps; the next ones are counted as dropped",
     )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "http"),
+        default="stdio",
+        help="stdio (the default), or http: Streamable HTTP on the loopback, which "
+        "needs --http-port and --http-token-file",
+    )
+    parser.add_argument(
+        "--http-host",
+        default="127.0.0.1",
+        help="the loopback address of the HTTP transport: 127.0.0.1, localhost, or ::1",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int,
+        help="the port of the HTTP transport; the server does not choose one",
+    )
+    parser.add_argument(
+        "--http-token-file",
+        type=Path,
+        help="the file with the bearer token of the HTTP transport: one line, "
+        "owner-only, outside the project",
+    )
     arguments = parser.parse_args(argv)
+    if arguments.transport == "http" and (
+        arguments.http_port is None or arguments.http_token_file is None
+    ):
+        parser.error("--transport http needs --http-port and --http-token-file")
     logging.basicConfig(
         stream=sys.stderr,
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    http: HttpSettings | None = None
     try:
         retention = None
         if arguments.keep_runs is not None or arguments.keep_days is not None:
             retention = RetentionPolicy(
                 keep_runs=arguments.keep_runs, keep_days=arguments.keep_days
+            )
+        if arguments.transport == "http":
+            http = HttpSettings(
+                host=arguments.http_host,
+                port=arguments.http_port,
+                token=read_token(arguments.http_token_file, project=arguments.project),
             )
         server = create_server(
             arguments.project,
@@ -351,9 +399,24 @@ def main(argv: list[str] | None = None) -> int:
             retention=retention,
             max_events=arguments.max_events,
             secrets_dir=arguments.secrets_dir,
+            http=http,
         )
-    except (StoreError, SecretError, ValueError) as error:
+    except (StoreError, SecretError, TokenError, ValueError) as error:
         print(f"{NAME}: {error}", file=sys.stderr)
         return 2
-    server.run("stdio")
+    if http is None:
+        server.run("stdio")
+        return 0
+    logging.getLogger(NAME).info(
+        "serving Streamable HTTP at %s%s on the loopback; the token is required",
+        f"http://{http.host}:{http.port}",
+        PATH,
+    )
+    server.run(
+        "streamable-http",
+        host=http.host,
+        port=http.port,
+        streamable_http_path=PATH,
+        transport_security=transport_security(http),
+    )
     return 0

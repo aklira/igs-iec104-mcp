@@ -16,6 +16,24 @@ versioned; the secrets must not be in it.
 the server is run from the source tree. Set `PYTHONPATH` to the repository's `src` directory, and start the
 interpreter of the `.venv` created by `uv sync --locked`.
 
+**`--transport http needs --http-port and --http-token-file`**. The HTTP transport has no defaults for its port or its
+token: give both (see [setup](setup.md#http-transport)).
+
+**`the HTTP transport listens on the loopback only`**. Use `127.0.0.1`, `localhost`, or `::1` for `--http-host`.
+
+**`the token file ... is readable by others`**, **`... is a symbolic link`**, or **`... is inside the project directory`**.
+Make the token file owner-only with `chmod 600`, name the file itself, and move it out of the project. The message never
+shows the token.
+
+**`the token must be 32 to 256 printable characters`**. Generate a new token with
+`python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`, and write it to the file on one line.
+
+**The client gets `401`**. The request has no `Authorization: Bearer <token>` header, or the token is not the one in the
+file. The server does not say which: compare the file with the client's configuration.
+
+**The client gets `421` or `403`**. The `Host` or the `Origin` header is not the listener's own name and port. Connect to
+the address the server logged, `http://127.0.0.1:<port>/mcp`, not to another name.
+
 ## A run cannot start
 
 **`engine_unavailable`: the server has no runtime image**. Start the server with `--runtime-image` and

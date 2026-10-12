@@ -1,6 +1,6 @@
 # MCP tools
 
-The server exposes 19 tools over stdio. Their descriptions are what the client shows; this page gives the contracts
+The server exposes 19 tools, over stdio or over the loopback HTTP transport. Their descriptions are what the client shows; this page gives the contracts
 behind them: the arguments, the results, the error codes, and the states a run moves through.
 
 Every tool returns its result as JSON. A failed call says its error code first, then a message that names what to

@@ -26,7 +26,8 @@ in `docs/ai-log/`.
 ## Status
 
 The milestones through V2 are done: definitions, the Docker bench lifecycle, the scenario engine, the MCP tools,
-the external target policy, the reports and retention, TLS on both roles, and redundancy groups. The release
+the external target policy, the reports and retention, TLS on both roles, and redundancy groups. The MCP server also
+speaks Streamable HTTP on the loopback, with a bearer token (M4). The release
 documentation is in progress; the remaining work is listed in the platform matrix. The server is not a certified
 implementation, and its reports do not certify the protocol behaviour of any station or client.
 
