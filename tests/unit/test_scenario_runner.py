@@ -145,7 +145,9 @@ class FakeEngine:
     async def check(self) -> None:
         return None
 
-    async def start(self, bench: Any, run_id: str, evidence: Path) -> FakeHandle:
+    async def start(
+        self, bench: Any, run_id: str, evidence: Path, material: Any
+    ) -> FakeHandle:
         if self.start_error is not None:
             raise self.start_error
         handle = FakeHandle(self)

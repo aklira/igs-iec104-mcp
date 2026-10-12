@@ -198,6 +198,18 @@
           ],
           "title": "Role",
           "type": "string"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstanceTls"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Secure the runtime's connections with TLS (\u00a76, \u00a79)."
         }
       },
       "required": [
@@ -207,6 +219,58 @@
         "common_address"
       ],
       "title": "Instance",
+      "type": "object"
+    },
+    "InstanceTls": {
+      "additionalProperties": false,
+      "description": "The TLS of a runtime's connections (IMPLEMENTATION.md \u00a76, \u00a79).\n\nEvery file is a secret reference: the controller holds the material, and the\ndefinition names it. The certificate, the key, and the trust anchor are DER files;\nthe intermediates link the certificate to the trust anchor, in chain order.",
+      "properties": {
+        "certificate": {
+          "description": "The runtime's certificate, as a secret reference (DER).",
+          "title": "Certificate",
+          "type": "string"
+        },
+        "intermediates": {
+          "description": "The intermediate certificates, in chain order (DER).",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Intermediates",
+          "type": "array"
+        },
+        "key": {
+          "description": "The private key of the certificate, as a secret reference (DER).",
+          "title": "Key",
+          "type": "string"
+        },
+        "server_name": {
+          "anyOf": [
+            {
+              "maxLength": 253,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For a client: the name the station's certificate is checked against. Without it, the client checks the address it connects to.",
+          "title": "Server Name"
+        },
+        "trust": {
+          "description": "The root certificate that signs the peer's certificate (DER).",
+          "title": "Trust",
+          "type": "string"
+        }
+      },
+      "required": [
+        "certificate",
+        "key",
+        "trust"
+      ],
+      "title": "InstanceTls",
       "type": "object"
     },
     "LinkParameters": {

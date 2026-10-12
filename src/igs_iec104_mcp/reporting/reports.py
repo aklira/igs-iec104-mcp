@@ -160,6 +160,10 @@ def build(runs: RunStore, run_id: str) -> dict[str, Any]:
         "inputs": {
             "bench_sha256": snapshot["bench_sha256"],
             "scenario_sha256": snapshot["scenario_sha256"],
+            "secrets": next(
+                (event["items"] for event in journal if event["kind"] == "secrets"),
+                [],
+            ),
         },
         "engine": {k: v for k, v in engine.items() if k not in {"kind", "seq"}}
         if engine

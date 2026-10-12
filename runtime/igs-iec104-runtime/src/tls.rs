@@ -49,13 +49,16 @@ impl fmt::Display for TlsSetupError {
 impl std::error::Error for TlsSetupError {}
 
 /// The secure wrapper of the runtime's connections, built from its TLS files. The settings of the
-/// library are checked against the profile first.
+/// library are checked against the profile first. The chain is the certificate, then the
+/// intermediates in the order they were given.
 pub fn secure(files: &TlsFiles) -> Result<Secure, TlsSetupError> {
-    let certificate = read(&files.certificate)?;
+    let mut chain = vec![read(&files.certificate)?];
+    for intermediate in &files.intermediates {
+        chain.push(read(intermediate)?);
+    }
     let key = read(&files.key)?;
     let trust = read(&files.trust)?;
-    let identity =
-        Identity::new(vec![certificate], key, &Discard).map_err(TlsSetupError::Settings)?;
+    let identity = Identity::new(chain, key, &Discard).map_err(TlsSetupError::Settings)?;
     let anchors = TrustAnchors::new(vec![trust]).map_err(TlsSetupError::Settings)?;
     let settings = TlsSettings::new(identity, anchors, Arc::new(Discard));
     settings.validate().map_err(TlsSetupError::Settings)?;
@@ -81,6 +84,7 @@ mod tests {
             key: "/nonexistent/k.der".into(),
             trust: "/nonexistent/t.der".into(),
             server_name: None,
+            intermediates: Vec::new(),
         };
         match secure(&files) {
             Err(TlsSetupError::File { path, .. }) => {
@@ -102,6 +106,7 @@ mod tests {
             key: dir.join("k.der"),
             trust: dir.join("t.der"),
             server_name: None,
+            intermediates: Vec::new(),
         };
         let result = secure(&files);
         let _ = std::fs::remove_dir_all(&dir);

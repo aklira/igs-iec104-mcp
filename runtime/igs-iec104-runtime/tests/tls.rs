@@ -45,6 +45,8 @@ impl Pki {
         pki.other_root();
         pki.leaf("station", "station.test");
         pki.leaf("client", "client.test");
+        pki.intermediate();
+        pki.leaf_signed_by("chained", "station.test", "inter");
         pki
     }
 
@@ -90,6 +92,11 @@ impl Pki {
 
     /// A certificate for `stem`, signed by the root, with the name and the address the tests use.
     fn leaf(&self, stem: &str, name: &str) {
+        self.leaf_signed_by(stem, name, "root");
+    }
+
+    /// A certificate for `stem`, signed by the authority `issuer` (`root` or `inter`).
+    fn leaf_signed_by(&self, stem: &str, name: &str, issuer: &str) {
         self.openssl(&[
             "req",
             "-new",
@@ -116,9 +123,9 @@ impl Pki {
             "-in",
             &format!("{stem}.csr"),
             "-CA",
-            "root.pem",
+            &format!("{issuer}.pem"),
             "-CAkey",
-            "root.key",
+            &format!("{issuer}.key"),
             "-CAcreateserial",
             "-days",
             "2",
@@ -154,13 +161,68 @@ impl Pki {
         ]);
     }
 
+    /// An intermediate authority, signed by the root, able to sign a station's certificate.
+    fn intermediate(&self) {
+        self.openssl(&[
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            "inter.key",
+            "-out",
+            "inter.csr",
+            "-subj",
+            "/CN=test-intermediate",
+        ]);
+        std::fs::write(
+            self.dir.join("inter.ext"),
+            "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n",
+        )
+        .expect("the extensions are written");
+        self.openssl(&[
+            "x509",
+            "-req",
+            "-in",
+            "inter.csr",
+            "-CA",
+            "root.pem",
+            "-CAkey",
+            "root.key",
+            "-CAcreateserial",
+            "-days",
+            "2",
+            "-extfile",
+            "inter.ext",
+            "-out",
+            "inter.pem",
+        ]);
+        self.der("inter");
+    }
+
     /// The files of a runtime with `certificate` and `key`, trusting the root `trust`.
     fn files(&self, certificate: &str, trust: &str, server_name: Option<&str>) -> TlsFiles {
+        self.chained(certificate, trust, server_name, &[])
+    }
+
+    /// The files of a runtime whose certificate is sent with the intermediates `intermediates`.
+    fn chained(
+        &self,
+        certificate: &str,
+        trust: &str,
+        server_name: Option<&str>,
+        intermediates: &[&str],
+    ) -> TlsFiles {
         TlsFiles {
             certificate: self.dir.join(format!("{certificate}.der")),
             key: self.dir.join(format!("{certificate}.key.der")),
             trust: self.dir.join(format!("{trust}.der")),
             server_name: server_name.map(str::to_owned),
+            intermediates: intermediates
+                .iter()
+                .map(|stem| self.dir.join(format!("{stem}.der")))
+                .collect(),
         }
     }
 }
@@ -346,4 +408,63 @@ async fn a_runtime_whose_tls_files_are_missing_does_not_start() {
         }
         other => panic!("expected a TLS file error, got {:?}", other.map(|_| ())),
     }
+}
+
+#[tokio::test]
+async fn a_station_whose_certificate_comes_with_its_intermediate_is_accepted() {
+    let pki = Pki::new("chain-accepted");
+    let token = TokenFile::new("chain-accepted");
+    let station = station(
+        &pki,
+        &token,
+        Some(pki.chained("chained", "root", None, &["inter"])),
+    )
+    .await;
+    let address = station.address.expect("the station listens");
+    let client = client(
+        address,
+        &token,
+        Some(pki.files("client", "root", Some(STATION_NAME))),
+    )
+    .await;
+
+    wait_for(client.control, "/v1/ready", |body| {
+        body["connection"] == "up"
+    })
+    .await;
+
+    client.stop().await;
+    station.stop().await;
+}
+
+#[tokio::test]
+async fn a_station_that_sends_no_intermediate_is_refused_by_the_client() {
+    let pki = Pki::new("chain-missing");
+    let token = TokenFile::new("chain-missing");
+    let station = station(
+        &pki,
+        &token,
+        Some(pki.chained("chained", "root", None, &[])),
+    )
+    .await;
+    let address = station.address.expect("the station listens");
+    let client = client(
+        address,
+        &token,
+        Some(pki.files("client", "root", Some(STATION_NAME))),
+    )
+    .await;
+
+    wait_for(client.control, "/v1/events", |body| {
+        has_event(body, |event| event["kind"] == "connect_failed")
+    })
+    .await;
+    let (_, ready) = get(client.control, "/v1/ready").await;
+    assert_ne!(
+        ready["connection"], "up",
+        "the issuer is missing from the chain"
+    );
+
+    client.stop().await;
+    station.stop().await;
 }

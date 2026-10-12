@@ -26,7 +26,12 @@ from igs_iec104_mcp.docker.specs import (
     SpecError,
 )
 from igs_iec104_mcp.models.bench import TestBench
-from igs_iec104_mcp.models.instance import Instance, LinkParameters, ResourceLimits
+from igs_iec104_mcp.models.instance import (
+    Instance,
+    InstanceTls,
+    LinkParameters,
+    ResourceLimits,
+)
 
 # The point kinds the runtime serves (its `points.rs`): all ten since S4d (D-019).
 # A kind the runtime does not serve is refused by name; the refusal serves new kinds.
@@ -46,6 +51,9 @@ SERVED_KINDS: frozenset[str] = frozenset(
 )
 POINTS_FILE = "points.json"
 TOKEN_FILE = "control-token"
+TLS_CERTIFICATE_FILE = "tls-certificate.der"
+TLS_KEY_FILE = "tls-key.der"
+TLS_TRUST_FILE = "tls-trust.der"
 MIB = 1024 * 1024
 # A relay only copies bytes: a small limit is enough for it.
 RELAY_LIMITS = Limits(cpus=0.25, memory_bytes=64 * MIB, pids=32)
@@ -78,6 +86,39 @@ class PlannedPublication:
 
 
 @dataclass(frozen=True)
+class PlannedTls:
+    """The TLS of a runtime: how many intermediates its chain has, and the name a client
+    checks the station against. The files themselves are delivered with the bench's
+    material (V1b), never recorded in the plan."""
+
+    intermediates: int
+    server_name: str | None
+
+
+def tls_file_names(tls: PlannedTls) -> tuple[str, ...]:
+    """The files a runtime with this TLS needs, delivered with the bench's material."""
+    intermediates = tuple(tls_intermediate_file(i) for i in range(tls.intermediates))
+    return (TLS_CERTIFICATE_FILE, TLS_KEY_FILE, TLS_TRUST_FILE, *intermediates)
+
+
+def tls_intermediate_file(index: int) -> str:
+    """The file of the intermediate certificate at `index` in the chain (DER)."""
+    return f"tls-intermediate-{index}.der"
+
+
+def tls_references(instance: InstanceTls) -> dict[str, str]:
+    """The secret reference that each file of an instance's TLS is delivered from."""
+    files = {
+        TLS_CERTIFICATE_FILE: instance.certificate,
+        TLS_KEY_FILE: instance.key,
+        TLS_TRUST_FILE: instance.trust,
+    }
+    for index, reference in enumerate(instance.intermediates):
+        files[tls_intermediate_file(index)] = reference
+    return files
+
+
+@dataclass(frozen=True)
 class PlannedRuntime:
     """A runtime of the bench: its instance, its network, its limits, and its points.
 
@@ -95,6 +136,7 @@ class PlannedRuntime:
     points: bytes
     link: LinkParameters
     publication: PlannedPublication | None = None
+    tls: PlannedTls | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +172,25 @@ def link_arguments(link: LinkParameters) -> tuple[str, ...]:
     )
 
 
+def tls_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
+    """The runtime's TLS flags, with the files it finds in its run directory."""
+    if runtime.tls is None:
+        return ()
+    arguments = [
+        "--tls-certificate",
+        runtime_path(TLS_CERTIFICATE_FILE),
+        "--tls-key",
+        runtime_path(TLS_KEY_FILE),
+        "--tls-trust",
+        runtime_path(TLS_TRUST_FILE),
+    ]
+    for index in range(runtime.tls.intermediates):
+        arguments += ["--tls-intermediate", runtime_path(tls_intermediate_file(index))]
+    if runtime.tls.server_name is not None:
+        arguments += ["--tls-server-name", runtime.tls.server_name]
+    return tuple(arguments)
+
+
 def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
     """The runtime's arguments as a station.
 
@@ -156,6 +217,7 @@ def server_arguments(runtime: PlannedRuntime) -> tuple[str, ...]:
         "--event-capacity",
         str(runtime.event_capacity),
         *link_arguments(runtime.link),
+        *tls_arguments(runtime),
     )
 
 
@@ -180,6 +242,7 @@ def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
         "--event-capacity",
         str(runtime.event_capacity),
         *link_arguments(runtime.link),
+        *tls_arguments(runtime),
     )
 
 
@@ -279,8 +342,15 @@ def _planned(instance: Instance, issues: list[str]) -> PlannedRuntime | None:
             host_port=instance.publish.host_port,
             advertise=instance.publish.advertise,
         )
+    tls = None
+    if instance.tls is not None:
+        tls = PlannedTls(
+            intermediates=len(instance.tls.intermediates),
+            server_name=instance.tls.server_name,
+        )
     return PlannedRuntime(
         publication=publication,
+        tls=tls,
         name=instance.name,
         role=instance.role,
         network=instance.network,

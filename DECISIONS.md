@@ -898,3 +898,37 @@ test can show it.
   that names the handshake; a runtime whose key file is missing does not start. `src/config.rs` (5 tests) checks the
   option rules, and `src/tls.rs` (2 tests) the file and settings errors. The workspace tests, clippy with warnings as
   errors, the format check, and `cargo deny` pass; the Python tests that drive the runtime binary pass with it.
+
+## D-042: TLS material of a bench from a secrets directory, and the intermediates (V1b)
+
+- Date: 2026-10-12 (task V1, second part: V1b).
+- Secrets: the server takes `--secrets-dir`. The directory must be outside the project directory and owner-only
+  (`chmod 700`); each secret is one owner-only file (`chmod 600`), named after the secret, and not a symbolic link; a
+  file over 64 KiB is refused. The reader (`definitions/secrets.py`) names the secret in its error and never shows its
+  content. The content is read when a run starts, before its run record is created: a missing or unreadable secret, or
+  a server without the directory, is refused as `invalid_definition`, and no run is created.
+- Delivery: the material reaches each runtime through the archive interface, as the control token and the points do,
+  before the container starts. It is never in the environment, a bind mount, the command line (which names only the
+  files in the run directory), or the evidence. The journal records one `secrets` event with each file's instance, file
+  name, reference, and SHA-256; the report lists the same in `inputs.secrets`. The tests check that the content appears
+  in neither.
+- Definition: an instance may declare `tls` with `certificate`, `key`, and `trust` (secret references, DER), up to eight
+  `intermediates` (in chain order), and, for a client, `server_name`. A station may not declare a server name. A value
+  that is not a secret reference is refused by name (the existing rule of `secret:<name>`).
+- Runtime: `--tls-intermediate FILE` may repeat; the chain is the certificate, then the intermediates in order. An
+  intermediate without the three TLS files is refused. The runtime image is rebuilt from this repository for the tests
+  (`podman build --file docker/runtime.Dockerfile runtime`), and the CI rebuilds it as before.
+- Plan: the TLS flags are added to a runtime only when its instance declares TLS, with the files of the run directory.
+  The plan records the number of intermediates, not their content. A bench whose TLS material is missing is refused
+  before any resource is created.
+- Not in V1b: the acceptance and rejection scenarios (V1c), and the station's record of a refused client (V1c); a
+  secret of an external target (its TLS names are not delivered yet); rotation of the secrets while a bench runs.
+- Tests: `tests/unit/test_secrets.py` (9 tests: the directory's location and mode; the reference form; a missing
+  secret; a group-readable secret, refused without its content; a symbolic link; the size limit), `tests/unit/test_instance_tls.py`
+  (the definition's rules; the plan's flags and chain order; the client's server name; the material names),
+  `tests/unit/test_run_secrets.py` (the engine receives the content; the journal and the report hold digests and no
+  content; a server without the directory and a missing secret are refused with no run created; a plain bench takes no
+  secrets), and `tests/integration/test_docker_tls.py`, which passes on Podman: a secured bench starts with its material,
+  the client's TLS connection comes up, it interrogates the station, and reads 12.5; the bench is removed. The runtime
+  tests (`tests/tls.rs`, 5 tests, including a station whose certificate comes with its intermediate, and a station that
+  sends none and is refused) and the workspace tests pass; clippy, format, and `cargo deny` pass.

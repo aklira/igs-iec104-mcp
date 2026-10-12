@@ -14,7 +14,12 @@ from typing import Literal
 
 from pydantic import Field, StrictInt, field_validator, model_validator
 
-from igs_iec104_mcp.models.common import CommonAddress, Definition, Name
+from igs_iec104_mcp.models.common import (
+    CommonAddress,
+    Definition,
+    Name,
+    SecretRef,
+)
 from igs_iec104_mcp.models.points import Point
 
 MAX_TIMEOUT_SECONDS: int = 255
@@ -135,6 +140,47 @@ class Publication(Definition):
         return value
 
 
+MAX_INTERMEDIATES: int = 8
+
+
+class InstanceTls(Definition):
+    """The TLS of a runtime's connections (IMPLEMENTATION.md §6, §9).
+
+    Every file is a secret reference: the controller holds the material, and the
+    definition names it. The certificate, the key, and the trust anchor are DER files;
+    the intermediates link the certificate to the trust anchor, in chain order.
+    """
+
+    certificate: SecretRef = Field(
+        description="The runtime's certificate, as a secret reference (DER)."
+    )
+    key: SecretRef = Field(
+        description="The private key of the certificate, as a secret reference (DER)."
+    )
+    trust: SecretRef = Field(
+        description="The root certificate that signs the peer's certificate (DER)."
+    )
+    intermediates: list[SecretRef] = Field(
+        default_factory=list,
+        max_length=MAX_INTERMEDIATES,
+        description="The intermediate certificates, in chain order (DER).",
+    )
+    server_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=253,
+        description="For a client: the name the station's certificate is checked "
+        "against. Without it, the client checks the address it connects to.",
+    )
+
+    @field_validator("server_name")
+    @classmethod
+    def _no_spaces(cls, value: str | None) -> str | None:
+        if value is not None and any(character.isspace() for character in value):
+            raise ValueError(f"the server name {value!r} contains a space")
+        return value
+
+
 class Instance(Definition):
     """A runtime of the bench: a client of a station, or a station."""
 
@@ -151,12 +197,25 @@ class Instance(Definition):
         default=None,
         description="Make a station reachable from outside Docker (§6). Stations only.",
     )
+    tls: InstanceTls | None = Field(
+        default=None,
+        description="Secure the runtime's connections with TLS (§6, §9).",
+    )
 
     @model_validator(mode="after")
     def _check_points(self) -> Instance:
         if self.role == "client" and self.publish is not None:
             raise ValueError(
                 f"instance {self.name!r} is a client: only a station can be published"
+            )
+        if (
+            self.role == "server"
+            and self.tls is not None
+            and self.tls.server_name is not None
+        ):
+            raise ValueError(
+                f"instance {self.name!r} is a station: its name is its certificate's, "
+                "so server_name is for a client"
             )
         if self.role == "client" and self.points:
             raise ValueError(

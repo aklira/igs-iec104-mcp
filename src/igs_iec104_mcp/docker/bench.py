@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from igs_iec104_mcp.docker.plan import (
     plan_bench,
     relay_arguments,
     server_arguments,
+    tls_file_names,
 )
 from igs_iec104_mcp.docker.specs import (
     CONTROL_NETWORK,
@@ -161,15 +162,27 @@ async def start_bench(
     evidence: Path,
     ready_timeout: float = 30.0,
     checkpoint: Checkpoint | None = None,
+    material: Mapping[str, Mapping[str, bytes]] | None = None,
 ) -> RunningBench:
     """Starts a bench: the networks, then each station and its readiness, then each
     client,
-    connected to its station. The plan is checked first. A failure rolls back what was
-    created, after the evidence of the containers that ran is kept.
+    connected to its station. The plan is checked first, and so is the material: each
+    runtime with TLS needs its files, given by instance name and file name. A failure
+    rolls back what was created, after the evidence of the containers that ran is kept.
 
     `image` is the runtime image and `relay` the relay image, each by digest or
     identity."""
     plan = plan_bench(bench)
+    material = material or {}
+    missing = [
+        f"{runtime.name} needs {name}"
+        for runtime in (*plan.servers, *plan.clients)
+        if runtime.tls is not None
+        for name in tls_file_names(runtime.tls)
+        if name not in material.get(runtime.name, {})
+    ]
+    if missing:
+        raise BenchError("the TLS material is missing: " + "; ".join(missing))
     ownership = Ownership(project=project, bench=bench.name, run=run)
     evidence.mkdir(parents=True, exist_ok=True)
     steps = _Steps(checkpoint)
@@ -204,6 +217,7 @@ async def start_bench(
                     token=token,
                     steps=steps,
                     ready_timeout=ready_timeout,
+                    material=material,
                 )
             except BaseException:
                 await _preserve_created(adapter, creation.created, evidence)
@@ -252,6 +266,7 @@ async def _bring_up(
     token: str,
     steps: _Steps,
     ready_timeout: float,
+    material: Mapping[str, Mapping[str, bytes]],
 ) -> dict[str, Member]:
     for network in plan.networks:
         await steps(f"network:{network.name}")
@@ -271,6 +286,7 @@ async def _bring_up(
             steps=steps,
             ready_timeout=ready_timeout,
             connect=None,
+            files=material.get(server.name, {}),
         )
     for client in plan.clients:
         station = members[plan.server_of[client.name]]
@@ -286,6 +302,7 @@ async def _bring_up(
             steps=steps,
             ready_timeout=ready_timeout,
             connect=address,
+            files=material.get(client.name, {}),
         )
     return members
 
@@ -302,6 +319,7 @@ async def _launch(
     steps: _Steps,
     ready_timeout: float,
     connect: str | None,
+    files: Mapping[str, bytes],
 ) -> Member:
     """A runtime and its relay: the runtime starts on its network, then the relay is
     created on the control network (where the engine publishes its port) and joined to
@@ -324,7 +342,11 @@ async def _launch(
     )
     await adapter.put_files(
         resource,
-        {POINTS_FILE: runtime.points, TOKEN_FILE: token.encode("utf-8")},
+        {
+            POINTS_FILE: runtime.points,
+            TOKEN_FILE: token.encode("utf-8"),
+            **files,
+        },
     )
     await steps(f"start:{name}")
     await adapter.start_container(resource)

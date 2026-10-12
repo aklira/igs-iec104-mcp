@@ -20,6 +20,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from igs_iec104_mcp.definitions import service, targets
+from igs_iec104_mcp.definitions.secrets import SecretError, SecretStore
 from igs_iec104_mcp.definitions.store import ProjectStore, StoreError
 from igs_iec104_mcp.reporting.reports import ReportOut
 from igs_iec104_mcp.scenarios.confirmation import ElicitingConfirmer
@@ -70,6 +71,7 @@ def create_server(
     relay_image: str | None = None,
     retention: RetentionPolicy | None = None,
     max_events: int = DEFAULT_MAX_EVENTS,
+    secrets_dir: Path | None = None,
 ) -> MCPServer:
     """The server over the project directory. Runs need both images; without them, a
     run is refused with `engine_unavailable`. The retention policy, when there is one,
@@ -77,13 +79,16 @@ def create_server(
     StoreError when the directory does not exist."""
     store = ProjectStore(project)
     runs = RunStore(project, max_events=max_events)
+    secrets = None
+    if secrets_dir is not None:
+        secrets = SecretStore(secrets_dir, project=project)
     if runtime_image and relay_image:
         engine: DockerEngine | NoEngine = DockerEngine(
             image=runtime_image, relay=relay_image
         )
     else:
         engine = NoEngine()
-    runner = Runner(store, runs, engine, retention)
+    runner = Runner(store, runs, engine, retention, secrets)
     interrupted = runner.reconcile()
     if interrupted:
         logging.getLogger(NAME).warning(
@@ -316,6 +321,12 @@ def main(argv: list[str] | None = None) -> int:
         help="keep the runs that ended within N days; run_prune removes older ones",
     )
     parser.add_argument(
+        "--secrets-dir",
+        type=Path,
+        help="the directory of the secrets the benches name (TLS material): one file "
+        "per secret, owner-only, outside the project",
+    )
+    parser.add_argument(
         "--max-events",
         type=int,
         default=DEFAULT_MAX_EVENTS,
@@ -339,8 +350,9 @@ def main(argv: list[str] | None = None) -> int:
             relay_image=arguments.relay_image,
             retention=retention,
             max_events=arguments.max_events,
+            secrets_dir=arguments.secrets_dir,
         )
-    except (StoreError, ValueError) as error:
+    except (StoreError, SecretError, ValueError) as error:
         print(f"{NAME}: {error}", file=sys.stderr)
         return 2
     server.run("stdio")

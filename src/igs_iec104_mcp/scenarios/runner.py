@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
+from igs_iec104_mcp.definitions.secrets import SecretError, SecretStore, digest
 from igs_iec104_mcp.definitions.service import ServiceError
 from igs_iec104_mcp.definitions.store import (
     Missing,
@@ -36,6 +37,7 @@ from igs_iec104_mcp.docker.adapter import DockerAdapter, DockerError
 from igs_iec104_mcp.docker.bench import recover as recover_bench
 from igs_iec104_mcp.docker.bench import start_bench
 from igs_iec104_mcp.docker.labels import Ownership
+from igs_iec104_mcp.docker.plan import tls_references
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.common import DefinitionError
 from igs_iec104_mcp.models.instance import ResourceLimits
@@ -62,6 +64,10 @@ from igs_iec104_mcp.storage.runs import (
     RunStore,
     UnknownRun,
 )
+
+# The files a bench's runtimes receive from the controller, by instance and file
+# name: the content of the secrets their TLS names (V1b). Never recorded, only digests.
+Material = dict[str, dict[str, bytes]]
 
 # The label of the project that owns the containers of a run.
 PROJECT_LABEL = "igs-mcp"
@@ -115,7 +121,7 @@ class Engine(Protocol):
     async def check(self) -> None: ...
 
     async def start(
-        self, bench: TestBench, run_id: str, evidence: Path
+        self, bench: TestBench, run_id: str, evidence: Path, material: Material
     ) -> BenchHandle: ...
 
     async def owners(self) -> list[Ownership]: ...
@@ -147,7 +153,9 @@ class DockerEngine:
             self._adapter = None
             raise EngineUnavailable(str(error)) from error
 
-    async def start(self, bench: TestBench, run_id: str, evidence: Path) -> BenchHandle:
+    async def start(
+        self, bench: TestBench, run_id: str, evidence: Path, material: Material
+    ) -> BenchHandle:
         await self.check()
         adapter = self._adapter
         if adapter is None:
@@ -160,6 +168,7 @@ class DockerEngine:
             image=self._image,
             relay=self._relay,
             evidence=evidence,
+            material=material,
         )
 
     def identities(self) -> dict[str, str]:
@@ -204,7 +213,9 @@ class NoEngine:
     async def check(self) -> None:
         raise EngineUnavailable(NO_ENGINE)
 
-    async def start(self, bench: TestBench, run_id: str, evidence: Path) -> BenchHandle:
+    async def start(
+        self, bench: TestBench, run_id: str, evidence: Path, material: Material
+    ) -> BenchHandle:
         raise EngineUnavailable(NO_ENGINE)
 
     def identities(self) -> dict[str, str]:
@@ -341,11 +352,13 @@ class Runner:
         runs: RunStore,
         engine: Engine,
         retention: RetentionPolicy | None = None,
+        secrets: SecretStore | None = None,
     ) -> None:
         self._store = store
         self._runs = runs
         self._engine = engine
         self._retention = retention
+        self._secrets = secrets
         self._running: dict[str, _Running] = {}
 
     async def start(
@@ -356,6 +369,7 @@ class Runner:
         target asks `confirmer` (see scenarios.confirmation)."""
         scenario, bench = self._definitions(scenario_name)
         _refuse_unsupported(bench)
+        material, digests = self._material(bench)
         try:
             await self._engine.check()
         except EngineUnavailable as error:
@@ -365,9 +379,11 @@ class Runner:
             self._runs.create(run_id, bench.name, scenario.name, _now_ms())
             self._store.snapshot_run(run_id, bench.name, scenario.name)
             self._runs.move(run_id, RunStatus.RUNNING)
+            if digests:
+                self._runs.record(run_id, "secrets", {"items": digests})
         cancel = asyncio.Event()
         task = asyncio.create_task(
-            self._execute(run_id, bench, scenario, cancel, confirmer)
+            self._execute(run_id, bench, scenario, cancel, confirmer, material)
         )
         self._running[run_id] = _Running(task=task, cancel=cancel)
         task.add_done_callback(lambda _: self._running.pop(run_id, None))
@@ -531,6 +547,39 @@ class Runner:
             raise ServiceError("storage_error", str(error)) from error
         return scenario, bench
 
+    def _material(self, bench: TestBench) -> tuple[Material, list[dict[str, str]]]:
+        """The content of the secrets the bench's TLS names, by instance and file, and
+        the digests a run records. Refused before any bench starts when a secret is
+        missing or cannot be read, or when the server has no secrets directory."""
+        material: Material = {}
+        digests: list[dict[str, str]] = []
+        for instance in bench.instances:
+            if instance.tls is None:
+                continue
+            if self._secrets is None:
+                raise ServiceError(
+                    "invalid_definition",
+                    f"instance {instance.name!r} names secrets, and the server has no "
+                    "secrets directory: start it with --secrets-dir",
+                )
+            files: dict[str, bytes] = {}
+            for file_name, reference in tls_references(instance.tls).items():
+                try:
+                    content = self._secrets.read(reference)
+                except SecretError as error:
+                    raise ServiceError("invalid_definition", str(error)) from error
+                files[file_name] = content
+                digests.append(
+                    {
+                        "instance": instance.name,
+                        "file": file_name,
+                        "reference": reference,
+                        "sha256": digest(content),
+                    }
+                )
+            material[instance.name] = files
+        return material, digests
+
     async def _execute(
         self,
         run_id: str,
@@ -538,12 +587,15 @@ class Runner:
         scenario: Scenario,
         cancel: asyncio.Event,
         confirmer: Confirmer | None,
+        material: Material,
     ) -> None:
         timer = asyncio.get_running_loop().call_later(
             _limit(bench), self._limit_reached, run_id, cancel
         )
         try:
-            status, reason = await self._run(run_id, bench, scenario, cancel, confirmer)
+            status, reason = await self._run(
+                run_id, bench, scenario, cancel, confirmer, material
+            )
         finally:
             timer.cancel()
         self._runs.record(run_id, "ended", {"status": str(status), "reason": reason})
@@ -556,11 +608,12 @@ class Runner:
         scenario: Scenario,
         cancel: asyncio.Event,
         confirmer: Confirmer | None,
+        material: Material,
     ) -> tuple[RunStatus, str]:
         evidence = self._runs.root / RUNS_DIRECTORY / run_id / EVIDENCE
         self._runs.record(run_id, "engine", self._engine.identities())
         try:
-            handle = await self._engine.start(bench, run_id, evidence)
+            handle = await self._engine.start(bench, run_id, evidence, material)
         except Exception as error:
             self._runs.record(
                 run_id, "error", {"detail": f"the bench did not start: {error}"}

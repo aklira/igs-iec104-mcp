@@ -53,6 +53,10 @@ pub struct TlsFiles {
     pub trust: PathBuf,
     /// The name a client checks the station's certificate against, when it is not the address.
     pub server_name: Option<String>,
+    /// The intermediate certificates that link the certificate to the trust anchor, in DER, in
+    /// the order they are sent after the certificate. None when the certificate is signed by the
+    /// trust anchor itself.
+    pub intermediates: Vec<PathBuf>,
 }
 
 /// What the runtime runs, and how its control API is reached.
@@ -118,6 +122,8 @@ pub enum ConfigError {
     ServerNameWithoutTls,
     /// `--tls-server-name` was given to a station, whose name is its certificate's.
     ServerNameWithServer,
+    /// `--tls-intermediate` was given without the TLS files.
+    IntermediateWithoutTls,
 }
 
 impl fmt::Display for ConfigError {
@@ -148,6 +154,9 @@ impl fmt::Display for ConfigError {
                 f,
                 "--tls-server-name is for a client: a station's name is its certificate's"
             ),
+            Self::IntermediateWithoutTls => {
+                write!(f, "--tls-intermediate needs the TLS files")
+            }
         }
     }
 }
@@ -176,6 +185,8 @@ pub const USAGE: &str =
   --tls-key FILE            the private key of the certificate, DER
   --tls-trust FILE          the root certificate that signs the peer's, DER
   --tls-server-name NAME    the name a client checks the station's certificate against
+  --tls-intermediate FILE   an intermediate certificate, DER, sent after the certificate;
+                            repeat it in chain order
   -h, --help                print this usage
 
 With no arguments, the runtime prints its identity and exits.";
@@ -203,6 +214,7 @@ where
     let mut key = None;
     let mut trust = None;
     let mut server_name = None;
+    let mut intermediates = Vec::new();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "-h" | "--help" => return Ok(Invocation::Usage),
@@ -262,6 +274,9 @@ where
             "--tls-key" => key = Some(PathBuf::from(value("--tls-key", &mut arguments)?)),
             "--tls-trust" => trust = Some(PathBuf::from(value("--tls-trust", &mut arguments)?)),
             "--tls-server-name" => server_name = Some(value("--tls-server-name", &mut arguments)?),
+            "--tls-intermediate" => {
+                intermediates.push(PathBuf::from(value("--tls-intermediate", &mut arguments)?));
+            }
             _ => return Err(ConfigError::UnknownOption(argument)),
         }
     }
@@ -286,7 +301,7 @@ where
         },
     };
     let control_token = control_token.ok_or(ConfigError::MissingToken)?;
-    let tls = tls_files(certificate, key, trust, server_name, &role)?;
+    let tls = tls_files(certificate, key, trust, server_name, intermediates, &role)?;
     LinkConfig::new(link_role, parameters).map_err(ConfigError::Link)?;
     Ok(Invocation::Run(Box::new(Config {
         role,
@@ -299,18 +314,23 @@ where
     })))
 }
 
-/// The TLS files of a command line: none, or all three, and a server name only for a client.
+/// The TLS files of a command line: none, or all three, a server name only for a client, and
+/// intermediates only with the three.
 fn tls_files(
     certificate: Option<PathBuf>,
     key: Option<PathBuf>,
     trust: Option<PathBuf>,
     server_name: Option<String>,
+    intermediates: Vec<PathBuf>,
     role: &Role,
 ) -> Result<Option<TlsFiles>, ConfigError> {
     let (certificate, key, trust) = match (certificate, key, trust) {
         (None, None, None) => {
             if server_name.is_some() {
                 return Err(ConfigError::ServerNameWithoutTls);
+            }
+            if !intermediates.is_empty() {
+                return Err(ConfigError::IntermediateWithoutTls);
             }
             return Ok(None);
         }
@@ -325,6 +345,7 @@ fn tls_files(
         key,
         trust,
         server_name,
+        intermediates,
     }))
 }
 
@@ -676,6 +697,7 @@ mod tests {
                 key: "k.der".into(),
                 trust: "t.der".into(),
                 server_name: Some("station.example".into()),
+                intermediates: Vec::new(),
             })
         );
     }
@@ -736,6 +758,38 @@ mod tests {
                 "x",
             ]),
             Err(ConfigError::ServerNameWithServer)
+        );
+    }
+
+    #[test]
+    fn the_intermediates_are_kept_in_the_order_they_are_given() {
+        let config = run(&[
+            "--connect",
+            "127.0.0.1:2404",
+            "--tls-certificate",
+            "c.der",
+            "--tls-key",
+            "k.der",
+            "--tls-trust",
+            "t.der",
+            "--tls-intermediate",
+            "first.der",
+            "--tls-intermediate",
+            "second.der",
+        ])
+        .expect("valid");
+        let intermediates = config.tls.map(|files| files.intermediates);
+        assert_eq!(
+            intermediates,
+            Some(vec!["first.der".into(), "second.der".into()])
+        );
+    }
+
+    #[test]
+    fn an_intermediate_needs_the_tls_files() {
+        assert_eq!(
+            run(&["--connect", "127.0.0.1:2404", "--tls-intermediate", "i.der"]),
+            Err(ConfigError::IntermediateWithoutTls)
         );
     }
 }

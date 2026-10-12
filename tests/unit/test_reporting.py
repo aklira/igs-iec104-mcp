@@ -78,7 +78,7 @@ async def test_a_passed_run_is_reported_with_its_expectations_and_inputs(
     assert document["steps"][0]["expected"]["action"] == "wait_transfer_started"
     assert document["steps"][2]["expected"]["value"] == 12.5
     assert all(s["event"] > 0 and s["seconds"] >= 0 for s in document["steps"])
-    assert document["inputs"] == snapshot_hashes(tmp_path, run_id)
+    assert document["inputs"] == {**snapshot_hashes(tmp_path, run_id), "secrets": []}
     assert document["engine"]["runtime"] == "sha256:fake"
     assert engine.handles[0].stopped, "the report is made after the bench is removed"
     assert document["cleanup"]["bench_stopped"] is True
