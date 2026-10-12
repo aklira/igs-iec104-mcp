@@ -89,22 +89,25 @@ class NetworkSpec:
 
 @dataclass(frozen=True)
 class PortPublication:
-    """A container port the engine publishes on the host: a host address and a host port
-    that the caller names. The engine picks no port here (§6)."""
+    """A container port the engine publishes on the host: a host address and a host
+    port. A host port of 0 is the engine's choice: the port is free when the container
+    starts, and the caller reads back the one the engine bound (§6; D-054)."""
 
     container_port: int
     bind: str
     host_port: int
 
     def __post_init__(self) -> None:
-        for value, what in (
-            (self.container_port, "container"),
-            (self.host_port, "host"),
-        ):
-            if not 1 <= value <= 65535:
-                raise SpecError(
-                    f"the {what} port {value} is out of range: use 1 to 65535"
-                )
+        if not 1 <= self.container_port <= 65535:
+            raise SpecError(
+                f"the container port {self.container_port} is out of range: use 1 to "
+                "65535"
+            )
+        if not 0 <= self.host_port <= 65535:
+            raise SpecError(
+                f"the host port {self.host_port} is out of range: use 0 for the "
+                "engine's choice, or 1 to 65535"
+            )
         try:
             ipaddress.ip_address(self.bind)
         except ValueError as error:

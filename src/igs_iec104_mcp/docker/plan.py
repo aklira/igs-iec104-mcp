@@ -341,7 +341,8 @@ def plan_bench(bench: TestBench) -> BenchPlan:
     clients: list[PlannedRuntime] = []
     host_ports: dict[int, str] = {}
     for instance in bench.instances:
-        if instance.publish is not None:
+        if instance.publish is not None and instance.publish.host_port != 0:
+            # Port 0 is the engine's choice, so two stations with it never collide.
             taken = host_ports.get(instance.publish.host_port)
             if taken is not None:
                 issues.append(

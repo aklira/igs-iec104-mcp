@@ -415,10 +415,11 @@ def _ports_of(spec: ContainerSpec) -> dict[str, Any]:
         return {f"{CONTROL_PORT}/tcp": ("127.0.0.1", None)}
     if spec.publish is not None:
         publication = spec.publish
+        # A host port of 0 is the engine's choice: no host port is named.
         return {
             f"{publication.container_port}/tcp": (
                 publication.bind,
-                publication.host_port,
+                publication.host_port or None,
             )
         }
     return {}

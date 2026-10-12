@@ -60,9 +60,13 @@ instances:
 - `bind` defaults to `127.0.0.1`. A wider address is an explicit choice in the definition, and it is the only way
   the port is reachable from another host.
 - `advertise` is the host name or address the external client connects to. It is declared, never discovered.
+- `host_port` is the host port the engine publishes. `0` lets the engine choose a free port when the station starts;
+  the port it chose is the one the bench reports, and the one the client must use.
 
-An external client connects to `advertise:host_port`. The station's relay listens on the port inside the bench, and
-the engine publishes that relay on `bind:host_port`.
+An external client connects to `advertise:<host port>`. The station's relay listens on the port inside the bench, and
+the engine publishes that relay on `bind:<host port>`. With `host_port: 0`, the bench records a `published` event with
+the endpoint in the run's journal when it starts (D-054): read it there, because a definition with `0` does not fix it.
+No host port is picked before it is bound.
 
 ## Fault proxies
 

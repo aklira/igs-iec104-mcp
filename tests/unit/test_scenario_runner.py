@@ -7,6 +7,7 @@ carry out is refused; and a request that cannot be carried out says so with a co
 """
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ import pytest
 from igs_iec104_mcp.definitions import service
 from igs_iec104_mcp.definitions.service import ServiceError
 from igs_iec104_mcp.definitions.store import ProjectStore
+from igs_iec104_mcp.models.loader import load_document
 from igs_iec104_mcp.models.run import TERMINAL, RunStatus
 from igs_iec104_mcp.scenarios.runner import NoEngine, Runner
 from igs_iec104_mcp.storage.runs import RunStore
@@ -123,6 +125,10 @@ class FakeHandle:
 
     def fault(self, client: str, server: str) -> Any:
         raise NotImplementedError("the fake bench has no fault proxy")
+
+    def advertised(self, instance: str) -> str | None:
+        """The endpoint of a published station: the fake bench publishes none."""
+        return "advertise.example:40123" if instance == "server-1" else None
 
     async def stop_instance(self, instance: str) -> object:
         """The client of the fake bench loses its connection with the station."""
@@ -334,3 +340,23 @@ async def test_the_journal_is_paged_with_a_cursor(tmp_path: Path) -> None:
     assert first.next_cursor is not None
     second = runner.events(started.id, limit=10, cursor=str(first.next_cursor))
     assert [event["seq"] for event in second.events] == [3, 4, 5, 6]
+
+
+async def test_a_published_station_records_its_endpoint_when_it_starts(
+    tmp_path: Path,
+) -> None:
+    data = load_document(BENCH)
+    station = next(i for i in data["instances"] if i["name"] == "server-1")
+    station["publish"] = {
+        "port": 2404,
+        "host_port": 0,
+        "advertise": "advertise.example",
+    }
+    store, runs = project(tmp_path, json.dumps(data, default=str))
+    runner = Runner(store, runs, FakeEngine())
+    started = await runner.start("interrogate")
+    await settled(runner, started.id)
+    published = [e for e in runs.events(started.id).events if e["kind"] == "published"]
+    assert [(e["instance"], e["endpoint"]) for e in published] == [
+        ("server-1", "advertise.example:40123")
+    ]

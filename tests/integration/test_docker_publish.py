@@ -7,8 +7,8 @@ bench is then removed, and no owned resource is left.
 
 The images are named by IGS_RUNTIME_IMAGE and IGS_RELAY_IMAGE, and the runtime binary by
 IGS_RUNTIME_BINARY. Without them the test skips, except in CI, where a missing input
-fails the run. The host port is picked free just before the bench starts; another
-process may take it first, and the start then fails with the engine's message.
+fails the run. The host port is chosen by the engine (`host_port: 0`) and reported when
+the station starts, so no port is picked before it is bound (D-054).
 """
 
 import asyncio
@@ -29,7 +29,6 @@ from igs_iec104_mcp.docker.labels import Ownership
 from igs_iec104_mcp.models.bench import TestBench as Bench
 from igs_iec104_mcp.models.loader import load_bench, load_document
 from igs_iec104_mcp.runtime.api import ControlClient
-from igs_iec104_mcp.runtime.local_bench import free_port
 from igs_iec104_mcp.runtime.process import (
     LocalRuntime,
     read_control_token,
@@ -73,8 +72,9 @@ def _identity(variable: str, dockerfile: str) -> str:
     return identity
 
 
-def published_bench(host_port: int) -> Bench:
-    """The basic pair, with its station published on `host_port` of the loopback."""
+def published_bench(host_port: int = 0) -> Bench:
+    """The basic pair, with its station published on the loopback. A host port of 0
+    lets the engine choose the port when the station starts (D-054)."""
     data = load_document(BASIC_PAIR.read_text(encoding="utf-8"))
     for instance in data["instances"]:
         if instance["name"] == "server-1":
@@ -105,8 +105,7 @@ async def test_a_client_outside_docker_reaches_the_published_station(
     runtime_binary: Path,
     tmp_path: Path,
 ) -> None:
-    host_port = free_port()
-    bench = published_bench(host_port)
+    bench = published_bench()
     run = secrets.token_hex(16)
     running = await start_bench(
         adapter,
@@ -120,7 +119,12 @@ async def test_a_client_outside_docker_reaches_the_published_station(
     )
     try:
         advertised = running.advertised("server-1")
-        assert advertised == f"{ADVERTISE}:{host_port}"
+        assert advertised is not None
+        host, _, port = advertised.rpartition(":")
+        assert host == ADVERTISE
+        assert 1 <= int(port) <= 65535, (
+            "the engine bound a port, and the bench reports it"
+        )
 
         external_dir = tmp_path / "external"
         external_dir.mkdir()

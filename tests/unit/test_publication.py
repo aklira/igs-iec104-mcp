@@ -58,7 +58,8 @@ def test_only_a_station_can_be_published() -> None:
 @pytest.mark.parametrize(
     "change,message",
     [
-        ({"host_port": 0}, "host_port"),
+        ({"host_port": -1}, "host_port"),
+        ({"host_port": 70000}, "host_port"),
         ({"port": 70000}, "port"),
         ({"bind": "not-an-address"}, "not an IP address to publish on"),
         ({"advertise": "10.0.0.5 extra"}, "contains a space"),
@@ -143,3 +144,25 @@ def test_a_publication_names_a_valid_port_and_address() -> None:
         PortPublication(container_port=0, bind="127.0.0.1", host_port=2404)
     with pytest.raises(SpecError, match="not an IP address"):
         PortPublication(container_port=2404, bind="host", host_port=2404)
+
+
+def test_two_stations_may_each_let_the_engine_choose_a_host_port() -> None:
+    data = published(BENCH, host_port=0)
+    data["instances"].append(
+        {
+            "name": "server-2",
+            "role": "server",
+            "network": "lan",
+            "common_address": 2,
+            "publish": {"port": 2404, "host_port": 0, "advertise": "10.0.0.5"},
+        }
+    )
+    result = plan_bench(Bench.model_validate(data))
+    assert [p.name for p in result.servers] == ["server-1", "server-2"]
+
+
+def test_a_host_port_of_zero_is_the_engine_choice_in_the_spec() -> None:
+    publication = PortPublication(container_port=2404, bind="127.0.0.1", host_port=0)
+    assert publication.host_port == 0
+    with pytest.raises(SpecError, match="out of range"):
+        PortPublication(container_port=2404, bind="127.0.0.1", host_port=70000)

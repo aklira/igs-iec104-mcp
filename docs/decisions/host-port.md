@@ -1,6 +1,6 @@
 # Decision: the host port of a published station
 
-Status: proposed, awaiting the maintainer. Related: X2 (D-036), X3 (D-052, D-053), the plan's rule on fixed and pre-picked
+Status: accepted (option A, approved by the maintainer on 2026-10-12); implemented in D-054. Related: X2 (D-036), X3 (D-052, D-053), the plan's rule on fixed and pre-picked
 ports (IMPLEMENTATION.md §15).
 
 ## Context
@@ -67,3 +67,9 @@ an external client must use; a fixed port in the definition is no longer a promi
 1. Accept `0` as "the engine chooses" in the definition (option A), or prefer a separate flag?
 2. Where is the reported endpoint shown: the run journal only (proposed), or also in a tool result (`run_get`)?
 3. Keep the fixed-port X2 test until A lands, or switch it in the same change?
+
+## Resolution
+
+The maintainer chose option A. The three questions were answered as recommended: `0` means "the engine chooses" in the
+definition; the endpoint reported at start is recorded in the run journal as a `published` event; the X2 test moves to
+`0` in the same change. See D-054.

@@ -1235,3 +1235,25 @@ test can show it.
   pre-picked host port. Options: the planner accepts `host_port: 0` and reports the port the engine chose (the same way
   the runtime reports its control port), or the publication keeps the fixed port and the test accepts the documented race.
   I recommend the first. X3 stays open until this is decided and the maintainer reviews the results and the feature matrix.
+
+## D-054: The engine chooses the host port of a published station (option A of host-port.md)
+
+- Date: 2026-10-12. The maintainer approved option A of `docs/decisions/host-port.md`, and answered its questions as
+  recommended: `0` is the engine's choice; the endpoint is recorded in the run journal; the X2 test moves to `0`.
+- Decision: `publish.host_port` accepts `0` (`models/instance.py`, `ge=0`). The plan publishes that port with no host port
+  named, so the engine picks a free one when the relay starts (`docker/adapter.py`, `_ports_of`). The bench reads the port
+  the engine bound from the publication container's record, and builds the advertised endpoint `advertise:<bound port>`
+  (`docker/bench.py`, `_bound_host_port`). A nonzero host port is still named as before, and two stations may not share
+  one. Two stations with `0` do not collide.
+- Journal: when a run's bench starts, each published station records a `published` event with its instance and endpoint
+  (`scenarios/runner.py`). The endpoint is what an external client uses while the bench runs. It is not in a tool
+  result yet: `run_get` does not show it.
+- Spec: `PortPublication` accepts a host port of `0` to `65535`, and the container port `1` to `65535`.
+- X2 test: `tests/integration/test_docker_publish.py` uses `0`; it no longer calls `free_port()`, so the race the plan
+  forbids is gone. The test checks that the advertised endpoint names the declared address and the port the engine bound.
+- Schema: `bench.schema.json` allows `host_port` `0`; regenerated.
+- Limits: the endpoint is known only after the station starts, so an external client is started after the bench. A bench
+  definition with `0` does not fix its endpoint, and the reader of a definition must look for the run's `published` event.
+- Tests: `tests/unit/test_publication.py` (host port `-1` and `70000` are refused; two stations with `0` plan; the spec
+  accepts `0` and refuses `70000`), `tests/unit/test_scenario_runner.py` (a published station records its endpoint in the
+  journal), `tests/integration/test_docker_publish.py` (the X2 test with `0`, on Podman).

@@ -447,7 +447,8 @@ async def _launch(
         publication = await _publish(
             adapter, creation, ownership, runtime, relay_id, ip, steps
         )
-        advertised = f"{runtime.publication.advertise}:{runtime.publication.host_port}"
+        bound = await _bound_host_port(adapter, publication, runtime.publication.port)
+        advertised = f"{runtime.publication.advertise}:{bound}"
     await steps(f"ready:{name}")
     body = await _await(
         adapter, resource, control, token, ready_timeout, lambda body: body["ready"]
@@ -515,6 +516,20 @@ async def _publish(
     )
     await adapter.start_container(resource)
     return resource
+
+
+async def _bound_host_port(
+    adapter: DockerAdapter, publication: Resource, container_port: int
+) -> int:
+    """The host port the engine bound for a published station's port. A port the plan
+    named is the one bound; a port of 0 is the engine's choice, read back here."""
+    attrs = await adapter.inspect(publication)
+    bindings = (attrs.get("NetworkSettings", {}).get("Ports") or {}).get(
+        f"{container_port}/tcp"
+    )
+    if not bindings:
+        raise BenchError(f"{publication.name} has no published port")
+    return int(bindings[0]["HostPort"])
 
 
 async def _launch_proxy(

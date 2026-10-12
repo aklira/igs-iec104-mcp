@@ -487,9 +487,9 @@
           "type": "string"
         },
         "host_port": {
-          "description": "The host port the engine publishes.",
+          "description": "The host port the engine publishes. 0 lets the engine choose a free port when the station starts; the bench reports the port it chose.",
           "maximum": 65535,
-          "minimum": 1,
+          "minimum": 0,
           "title": "Host Port",
           "type": "integer"
         },

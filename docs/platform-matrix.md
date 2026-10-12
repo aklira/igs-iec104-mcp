@@ -52,7 +52,7 @@ Desktop, with the same test suite, before a release.
 | Manual switchover through the control API | not exposed | the library provides it; the control API does not |
 | Group transfer start (`POST /v1/transfer/start`) | accepted, no effect | the group starts the transfer of the station it starts |
 | Event-log overflow | supported | a drop is a gap in the run and its report |
-| Published station (external client reaches a managed station) | supported on Linux | Docker Desktop check open |
+| Published station (external client reaches a managed station) | supported on Linux; the host port is chosen by the engine (D-054) | the endpoint is in the run's `published` event; Docker Desktop check open |
 | External target policy (validation, operations, opt-in) | supported and tested | `target_validate`; the probe sends no IEC frame |
 | Confirmation of state-changing operations | supported | MCP elicitation; a reviewed opt-in when the client cannot be asked |
 | Run records, reports, retention | supported and tested | JSON, JUnit XML, Markdown |

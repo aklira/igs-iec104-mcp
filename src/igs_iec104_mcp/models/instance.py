@@ -107,7 +107,10 @@ class Publication(Definition):
         ge=1, le=65535, description="The station's port in the bench."
     )
     host_port: StrictInt = Field(
-        ge=1, le=65535, description="The host port the engine publishes."
+        ge=0,
+        le=65535,
+        description="The host port the engine publishes. 0 lets the engine choose a "
+        "free port when the station starts; the bench reports the port it chose.",
     )
     bind: str = Field(
         default="127.0.0.1",

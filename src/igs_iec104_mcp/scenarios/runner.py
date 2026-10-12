@@ -123,6 +123,8 @@ class BenchHandle(Protocol):
 
     def fault(self, client: str, server: str) -> FaultClient: ...
 
+    def advertised(self, instance: str) -> str | None: ...
+
     async def stop_instance(self, instance: str) -> object: ...
 
     async def stop(self, grace: int = 10) -> object: ...
@@ -695,6 +697,16 @@ class Runner:
         async def before_stop(name: str) -> None:
             await self._record_drop(run_id, bench, managed, name)
 
+        for instance in bench.instances:
+            if instance.publish is not None:
+                self._runs.record(
+                    run_id,
+                    "published",
+                    {
+                        "instance": instance.name,
+                        "endpoint": handle.advertised(instance.name),
+                    },
+                )
         managed = _ManagedBench(handle, bench, before_stop)
         status, reason = RunStatus.ERROR, "the run failed"
         try:
