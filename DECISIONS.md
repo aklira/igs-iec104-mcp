@@ -1257,3 +1257,17 @@ test can show it.
 - Tests: `tests/unit/test_publication.py` (host port `-1` and `70000` are refused; two stations with `0` plan; the spec
   accepts `0` and refuses `70000`), `tests/unit/test_scenario_runner.py` (a published station records its endpoint in the
   journal), `tests/integration/test_docker_publish.py` (the X2 test with `0`, on Podman).
+
+## D-055: Maintainer review of X3 (validated)
+
+- Date: 2026-10-12. The maintainer reviewed the results of X3 (D-052, D-053) and the platform matrix
+  (`docs/platform-matrix.md`), and validated X3.
+- Accepted scope: the independent peer (OpenMUC j60870 1.8.0, GPL v3, as a black box in its own container) is verified in
+  both directions on the bench network: our client against their station (transfer start, station interrogation, point
+  type, cause, and value), and their client against our managed station (the same exchange, read from their output and
+  from our station's record of the connection).
+- Accepted limits, as the matrix states them: commands, reads, and spontaneous updates are not covered against the peer;
+  a client outside Docker is not tested against the peer yet (the engine-chosen host port of D-054 makes it possible);
+  the tests check the exchange, not protocol conformance, and the results are not a certification.
+- Effect on V4: X3 no longer blocks it. The platform matrix is complete for Linux; V4 stays open until the Docker
+  Desktop and WSL check has run on a machine that has Docker Desktop.
