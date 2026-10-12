@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -293,8 +293,12 @@ async def _bring_up(
             files=material.get(server.name, {}),
         )
     for client in plan.clients:
-        station = members[plan.server_of[client.name]]
-        address = await _station_address(adapter, station, ownership, client.network)
+        addresses = []
+        for name in plan.server_of[client.name]:
+            station = members[name]
+            addresses.append(
+                await _station_address(adapter, station, ownership, client.network)
+            )
         members[client.name] = await _launch(
             adapter,
             creation,
@@ -305,7 +309,7 @@ async def _bring_up(
             token=token,
             steps=steps,
             ready_timeout=ready_timeout,
-            connect=address,
+            connect=addresses,
             files=material.get(client.name, {}),
             await_connection=await_clients,
         )
@@ -323,7 +327,7 @@ async def _launch(
     token: str,
     steps: _Steps,
     ready_timeout: float,
-    connect: str | None,
+    connect: Sequence[str] | None,
     files: Mapping[str, bytes],
     await_connection: bool = True,
 ) -> Member:

@@ -94,7 +94,7 @@ def test_a_client_names_its_server_name_in_its_flags() -> None:
     )
     plan = plan_bench(bench)
     client = next(c for c in plan.clients if c.name == "client-1")
-    arguments = client_arguments(client, "172.20.0.5:2404")
+    arguments = client_arguments(client, ["172.20.0.5:2404"])
     assert arguments[arguments.index("--tls-server-name") + 1] == "station.test"
 
 

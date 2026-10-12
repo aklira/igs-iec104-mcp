@@ -995,3 +995,21 @@ test can show it.
   tests (repeated `--connect`, the limit of eight), the contract tests (the `switched` sample; an event naming its
   station). The existing runtime suites pass unchanged, so a client of one station is unaffected. The Docker tests of a
   client of one station pass with the rebuilt image.
+
+## D-045: A client of a redundancy group in the bench and the planner (V2b)
+
+- Date: 2026-10-12 (task V2, second part: V2b).
+- Decision: a client may connect to several stations of its network. The model already allowed it (each pair of client and
+  server is declared once); the planner refused it ("a client has one server"), and that refusal is removed. The planner
+  keeps the stations of each client in the order the bench names its connections, and the bench starts them first, then
+  gives the client one `--connect` for each, in that order (`client_arguments`). The stations form the client's
+  redundancy group, which the runtime runs (D-044).
+- Limit: a client with more than eight stations is refused by the planner, as the runtime's group holds at most eight. A
+  client with no connection is still refused.
+- Not changed: an external target is still not connected (X1 and the planner's rule), so a group of an external target
+  is refused as before; the planner's check that every connection is on one network applies to each station.
+- Tests: `tests/unit/test_docker_plan.py` (a client of two stations is planned as a group, and its arguments carry both
+  addresses; a group of nine stations is refused; the basic pair keeps its single station, and the plan's server table is
+  now a tuple per client), `tests/unit/test_instance_tls.py` (the new argument type). `tests/integration/test_docker_group.py`
+  passes on Podman: a bench with a client of two stations starts, the client sees two stations, its group starts one of
+  them without a request, and the bench is removed. The single-station Docker tests pass with the same image.

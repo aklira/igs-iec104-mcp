@@ -47,7 +47,7 @@ def test_the_basic_pair_is_planned_with_its_station_and_its_client() -> None:
     assert [network.name for network in plan.networks] == ["lan", "wan"]
     assert [runtime.name for runtime in plan.servers] == ["server-1"]
     assert [runtime.name for runtime in plan.clients] == ["client-1"]
-    assert plan.server_of == {"client-1": "server-1"}
+    assert plan.server_of == {"client-1": ("server-1",)}
     points = json.loads(plan.servers[0].points)
     assert points["schema_version"] == 1
     assert points["points"][0]["address"] == 100
@@ -66,7 +66,7 @@ def test_a_station_listens_on_a_port_the_runtime_picks_and_publishes_control() -
 
 def test_a_client_is_given_the_address_of_its_station() -> None:
     client = plan_bench(Bench.model_validate(BENCH)).clients[0]
-    arguments = client_arguments(client, "172.18.0.2:2404")
+    arguments = client_arguments(client, ["172.18.0.2:2404"])
     assert arguments[arguments.index("--connect") + 1] == "172.18.0.2:2404"
     assert "--points" not in arguments
 
@@ -106,7 +106,7 @@ def test_link_parameters_are_passed_to_the_runtime_as_flags() -> None:
     data = copy.deepcopy(BENCH)
     instance(data, "client-1")["parameters"] = {"t1": 20, "t2": 5, "k": 4}
     plan_ = plan_bench(Bench.model_validate(data))
-    arguments = client_arguments(plan_.clients[0], "172.18.0.2:2404")
+    arguments = client_arguments(plan_.clients[0], ["172.18.0.2:2404"])
     assert arguments[arguments.index("--t1") + 1] == "20"
     assert arguments[arguments.index("--t2") + 1] == "5"
     assert arguments[arguments.index("--k") + 1] == "4"
@@ -155,14 +155,35 @@ def test_a_client_without_a_connection_is_refused() -> None:
     assert "no connection" in issue
 
 
-def test_a_client_with_two_connections_is_refused() -> None:
+def test_a_client_with_two_connections_is_planned_as_a_redundancy_group() -> None:
     data = copy.deepcopy(BENCH)
     data["instances"].append(
         {"name": "server-2", "role": "server", "network": "lan", "common_address": 2}
     )
     data["connections"].append({"client": "client-1", "server": "server-2"})
+    plan_ = plan_bench(Bench.model_validate(data))
+    assert plan_.server_of == {"client-1": ("server-1", "server-2")}
+    arguments = client_arguments(plan_.clients[0], ["10.0.0.1:2404", "10.0.0.2:2404"])
+    connects = [arguments[i + 1] for i, a in enumerate(arguments) if a == "--connect"]
+    assert connects == ["10.0.0.1:2404", "10.0.0.2:2404"]
+
+
+def test_a_redundancy_group_holds_at_most_eight_stations() -> None:
+    data = copy.deepcopy(BENCH)
+    data["connections"] = []
+    for number in range(2, 11):
+        data["instances"].append(
+            {
+                "name": f"server-{number}",
+                "role": "server",
+                "network": "lan",
+                "common_address": number,
+            }
+        )
+        data["connections"].append({"client": "client-1", "server": f"server-{number}"})
+    data["connections"].append({"client": "client-1", "server": "server-1"})
     (issue,) = refused(data)
-    assert "two connections" in issue
+    assert "a redundancy group holds at most 8" in issue
 
 
 def test_every_problem_is_reported_together() -> None:

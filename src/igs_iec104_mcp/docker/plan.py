@@ -8,7 +8,8 @@ The plan refuses, by name, what the runtime cannot do yet:
   (Q-003);
 - a connection whose ends are not on one network, or that reaches an external target
   (external targets come with task X1);
-- a client that does not have exactly one connection, since a client has one server.
+- a client with no connection, or with more stations than a redundancy group can hold
+  (eight, the runtime's limit, IEC 60870-5-104 §10).
 
 Nothing here touches Docker: the plan is data, so that a bad bench is refused before any
 resource exists."""
@@ -16,6 +17,7 @@ resource exists."""
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from igs_iec104_mcp.docker.specs import (
@@ -55,6 +57,9 @@ TLS_CERTIFICATE_FILE = "tls-certificate.der"
 TLS_KEY_FILE = "tls-key.der"
 TLS_TRUST_FILE = "tls-trust.der"
 MIB = 1024 * 1024
+# The most stations a client connects to: a redundancy group of this size (the runtime's
+# limit).
+MAX_STATIONS_PER_CLIENT = 8
 # A relay only copies bytes: a small limit is enough for it.
 RELAY_LIMITS = Limits(cpus=0.25, memory_bytes=64 * MIB, pids=32)
 
@@ -145,7 +150,7 @@ class BenchPlan:
     networks: tuple[PlannedNetwork, ...]
     servers: tuple[PlannedRuntime, ...]
     clients: tuple[PlannedRuntime, ...]
-    server_of: dict[str, str]
+    server_of: dict[str, tuple[str, ...]]
 
 
 def runtime_path(name: str) -> str:
@@ -227,12 +232,15 @@ def relay_arguments(target: str, port: int = CONTROL_PORT) -> tuple[str, ...]:
     return ("--listen", f"0.0.0.0:{port}", "--target", target)
 
 
-def client_arguments(runtime: PlannedRuntime, connect: str) -> tuple[str, ...]:
-    """The runtime's arguments as a client of the station at `connect`
-    (`address:port`)."""
+def client_arguments(
+    runtime: PlannedRuntime, connect: Sequence[str]
+) -> tuple[str, ...]:
+    """The runtime's arguments as a client of the stations at `connect`
+    (`address:port`), one `--connect` for each, in the order the bench names them.
+    Several stations form a redundancy group (IEC 60870-5-104 §10)."""
+    connects = [part for address in connect for part in ("--connect", address)]
     return (
-        "--connect",
-        connect,
+        *connects,
         "--common-address",
         str(runtime.common_address),
         "--control",
@@ -256,7 +264,7 @@ def plan_bench(bench: TestBench) -> BenchPlan:
         )
     instances = {instance.name: instance for instance in bench.instances}
     external = {target.name for target in bench.external_targets}
-    server_of: dict[str, str] = {}
+    server_of: dict[str, list[str]] = {}
     for connection in bench.connections:
         if connection.client in external or connection.server in external:
             issues.append(
@@ -272,11 +280,13 @@ def plan_bench(bench: TestBench) -> BenchPlan:
                 f"{client.name} is on {client.network!r}, {server.name} on "
                 f"{server.network!r}"
             )
-        if client.name in server_of:
+        server_of.setdefault(client.name, []).append(server.name)
+    for client_name, stations in server_of.items():
+        if len(stations) > MAX_STATIONS_PER_CLIENT:
             issues.append(
-                f"client {client.name!r} has two connections: a client has one server"
+                f"client {client_name!r} connects to {len(stations)} stations: a "
+                f"redundancy group holds at most {MAX_STATIONS_PER_CLIENT}"
             )
-        server_of[client.name] = server.name
 
     servers: list[PlannedRuntime] = []
     clients: list[PlannedRuntime] = []
@@ -310,7 +320,7 @@ def plan_bench(bench: TestBench) -> BenchPlan:
         ),
         servers=tuple(servers),
         clients=tuple(clients),
-        server_of=server_of,
+        server_of={name: tuple(stations) for name, stations in server_of.items()},
     )
 
 
