@@ -65,6 +65,7 @@ fn config(connect: SocketAddr, token: &TokenFile) -> Config {
         event_capacity: DEFAULT_EVENT_CAPACITY,
         parameters: Parameters::default(),
         control_token: token.0.clone(),
+        tls: None,
     }
 }
 

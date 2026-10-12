@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use igs_iec104::procedures;
+use igs_iec104::tls::Secure;
 use igs_iec104::{Client, ClientConfig, Delivery, Event, OfflineRequests};
 use igs_iec104_codec::asdu::Asdu;
 use igs_iec104_codec::elements::{CounterFreeze, Qcc, Qoc, Qoi, Sco};
@@ -137,16 +138,21 @@ pub enum Request {
     },
 }
 
-/// The configuration of the client of the runtime for the station at `connect`.
+/// The configuration of the client of the runtime for the station at `connect`. With `secure`,
+/// the connection is TLS, and the station's certificate is checked against the host name.
 pub fn client_config(
     connect: std::net::SocketAddr,
     common_address: u16,
     parameters: Parameters,
+    secure: Option<(Secure, String)>,
 ) -> Result<ClientConfig, LinkError> {
     let mut config = ClientConfig::new(connect, CommonAddress::new(common_address))
         .with_offline_requests(OfflineRequests::Discard)
         .with_parameters(parameters)?;
     config.capacity = CLIENT_CAPACITY;
+    if let Some((secure, host)) = secure {
+        config = config.with_tls(secure, host);
+    }
     Ok(config)
 }
 
@@ -510,6 +516,7 @@ mod tests {
             "127.0.0.1:2404".parse().expect("address"),
             1,
             Parameters::default(),
+            None,
         )
         .expect("the defaults are valid");
         assert_eq!(config.capacity, CLIENT_CAPACITY);

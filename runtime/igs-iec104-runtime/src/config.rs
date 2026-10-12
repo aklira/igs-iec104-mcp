@@ -40,6 +40,21 @@ pub enum Role {
     },
 }
 
+/// The files of a secured connection: the certificate of the runtime, its private key, and the
+/// trust anchor that signs its peer's certificate. All are DER. The server name is what a client
+/// checks the station's certificate against; it defaults to the station's address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TlsFiles {
+    /// The certificate of the runtime, in DER.
+    pub certificate: PathBuf,
+    /// The private key of the certificate, in DER.
+    pub key: PathBuf,
+    /// The root certificate that signs the peer's certificate, in DER.
+    pub trust: PathBuf,
+    /// The name a client checks the station's certificate against, when it is not the address.
+    pub server_name: Option<String>,
+}
+
 /// What the runtime runs, and how its control API is reached.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -56,6 +71,8 @@ pub struct Config {
     pub parameters: Parameters,
     /// The file with the control token (see `token`). It is required.
     pub control_token: PathBuf,
+    /// The TLS files, when the connections are secured. Without them the connections are plain.
+    pub tls: Option<TlsFiles>,
 }
 
 /// What the command line asks for.
@@ -95,6 +112,12 @@ pub enum ConfigError {
     },
     /// The link parameters are not valid: the library's rule, as it names the parameter.
     Link(LinkError),
+    /// Some of the TLS files were given, but not all three.
+    IncompleteTls,
+    /// `--tls-server-name` was given without the TLS files.
+    ServerNameWithoutTls,
+    /// `--tls-server-name` was given to a station, whose name is its certificate's.
+    ServerNameWithServer,
 }
 
 impl fmt::Display for ConfigError {
@@ -114,6 +137,17 @@ impl fmt::Display for ConfigError {
             Self::MissingToken => write!(f, "--control-token-file FILE is required"),
             Self::Invalid { option, value } => write!(f, "invalid value {value:?} for {option}"),
             Self::Link(error) => write!(f, "the link parameters are not valid: {error}"),
+            Self::IncompleteTls => write!(
+                f,
+                "a secured runtime needs --tls-certificate, --tls-key and --tls-trust together"
+            ),
+            Self::ServerNameWithoutTls => {
+                write!(f, "--tls-server-name needs the TLS files")
+            }
+            Self::ServerNameWithServer => write!(
+                f,
+                "--tls-server-name is for a client: a station's name is its certificate's"
+            ),
         }
     }
 }
@@ -138,6 +172,10 @@ pub const USAGE: &str =
   --k N                     the unacknowledged I frames a sender may have, 1 to 32767 (default 12)
   --w N                     the I frames received before an acknowledgement, 1 to 32767 (default 8)
   --control-token-file FILE the file with the control token, required
+  --tls-certificate FILE    the runtime's certificate, DER; with --tls-key and --tls-trust
+  --tls-key FILE            the private key of the certificate, DER
+  --tls-trust FILE          the root certificate that signs the peer's, DER
+  --tls-server-name NAME    the name a client checks the station's certificate against
   -h, --help                print this usage
 
 With no arguments, the runtime prints its identity and exits.";
@@ -161,6 +199,10 @@ where
     let mut selection_timeout_ms = DEFAULT_SELECTION_TIMEOUT_MS;
     let mut parameters = Parameters::default();
     let mut control_token = None;
+    let mut certificate = None;
+    let mut key = None;
+    let mut trust = None;
+    let mut server_name = None;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "-h" | "--help" => return Ok(Invocation::Usage),
@@ -214,6 +256,12 @@ where
                     &mut arguments,
                 )?));
             }
+            "--tls-certificate" => {
+                certificate = Some(PathBuf::from(value("--tls-certificate", &mut arguments)?));
+            }
+            "--tls-key" => key = Some(PathBuf::from(value("--tls-key", &mut arguments)?)),
+            "--tls-trust" => trust = Some(PathBuf::from(value("--tls-trust", &mut arguments)?)),
+            "--tls-server-name" => server_name = Some(value("--tls-server-name", &mut arguments)?),
             _ => return Err(ConfigError::UnknownOption(argument)),
         }
     }
@@ -238,6 +286,7 @@ where
         },
     };
     let control_token = control_token.ok_or(ConfigError::MissingToken)?;
+    let tls = tls_files(certificate, key, trust, server_name, &role)?;
     LinkConfig::new(link_role, parameters).map_err(ConfigError::Link)?;
     Ok(Invocation::Run(Box::new(Config {
         role,
@@ -246,7 +295,37 @@ where
         event_capacity,
         parameters,
         control_token,
+        tls,
     })))
+}
+
+/// The TLS files of a command line: none, or all three, and a server name only for a client.
+fn tls_files(
+    certificate: Option<PathBuf>,
+    key: Option<PathBuf>,
+    trust: Option<PathBuf>,
+    server_name: Option<String>,
+    role: &Role,
+) -> Result<Option<TlsFiles>, ConfigError> {
+    let (certificate, key, trust) = match (certificate, key, trust) {
+        (None, None, None) => {
+            if server_name.is_some() {
+                return Err(ConfigError::ServerNameWithoutTls);
+            }
+            return Ok(None);
+        }
+        (Some(certificate), Some(key), Some(trust)) => (certificate, key, trust),
+        _ => return Err(ConfigError::IncompleteTls),
+    };
+    if server_name.is_some() && matches!(role, Role::Server { .. }) {
+        return Err(ConfigError::ServerNameWithServer);
+    }
+    Ok(Some(TlsFiles {
+        certificate,
+        key,
+        trust,
+        server_name,
+    }))
 }
 
 fn value<I: Iterator<Item = String>>(
@@ -573,5 +652,90 @@ mod tests {
             station,
             Err(ConfigError::Link(LinkError::T2NotBelowT1 { .. }))
         ));
+    }
+
+    #[test]
+    fn a_client_takes_the_three_tls_files_and_an_optional_server_name() {
+        let config = run(&[
+            "--connect",
+            "127.0.0.1:2404",
+            "--tls-certificate",
+            "c.der",
+            "--tls-key",
+            "k.der",
+            "--tls-trust",
+            "t.der",
+            "--tls-server-name",
+            "station.example",
+        ])
+        .expect("valid");
+        assert_eq!(
+            config.tls,
+            Some(TlsFiles {
+                certificate: "c.der".into(),
+                key: "k.der".into(),
+                trust: "t.der".into(),
+                server_name: Some("station.example".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn a_station_is_secured_by_the_three_files_alone() {
+        let config = run(&[
+            "--listen",
+            "127.0.0.1:0",
+            "--points",
+            "p.json",
+            "--tls-certificate",
+            "c.der",
+            "--tls-key",
+            "k.der",
+            "--tls-trust",
+            "t.der",
+        ])
+        .expect("valid");
+        assert_eq!(config.tls.map(|files| files.server_name), Some(None));
+    }
+
+    #[test]
+    fn a_plain_runtime_has_no_tls_files() {
+        assert_eq!(
+            run(&["--connect", "127.0.0.1:2404"]).expect("valid").tls,
+            None
+        );
+    }
+
+    #[test]
+    fn the_tls_files_are_all_or_nothing() {
+        assert_eq!(
+            run(&["--connect", "127.0.0.1:2404", "--tls-certificate", "c.der"]),
+            Err(ConfigError::IncompleteTls)
+        );
+        assert_eq!(
+            run(&["--connect", "127.0.0.1:2404", "--tls-server-name", "x"]),
+            Err(ConfigError::ServerNameWithoutTls)
+        );
+    }
+
+    #[test]
+    fn a_station_has_no_server_name_to_check() {
+        assert_eq!(
+            run(&[
+                "--listen",
+                "127.0.0.1:0",
+                "--points",
+                "p.json",
+                "--tls-certificate",
+                "c.der",
+                "--tls-key",
+                "k.der",
+                "--tls-trust",
+                "t.der",
+                "--tls-server-name",
+                "x",
+            ]),
+            Err(ConfigError::ServerNameWithServer)
+        );
     }
 }

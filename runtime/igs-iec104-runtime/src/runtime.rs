@@ -25,6 +25,7 @@ use crate::config::{Config, Role, DEFAULT_EVENT_CAPACITY};
 use crate::points::{self, PointError, PointSpec};
 use crate::server_role::{self, CommandRecord, Policy, StationError, StationSettings};
 use crate::station_log::{StationEventKind, StationLog};
+use crate::tls::{self, TlsSetupError};
 use crate::token::{ControlToken, TokenError};
 
 /// Requests waiting for the client. A full queue makes a request wait for its turn.
@@ -119,6 +120,8 @@ pub enum BindError {
     Token(TokenError),
     /// The link parameters are not valid for the role.
     Link(igs_iec104_link::ConfigError),
+    /// The TLS files cannot secure the connections.
+    Tls(TlsSetupError),
 }
 
 impl fmt::Display for BindError {
@@ -129,6 +132,7 @@ impl fmt::Display for BindError {
             Self::Points(error) => write!(f, "{error}"),
             Self::Station(error) => write!(f, "{error}"),
             Self::Token(error) => write!(f, "{error}"),
+            Self::Tls(error) => write!(f, "{error}"),
         }
     }
 }
@@ -143,11 +147,28 @@ impl Runtime {
             .await
             .map_err(BindError::Io)?;
         let control_address = control.local_addr().map_err(BindError::Io)?;
+        let secure = config
+            .tls
+            .as_ref()
+            .map(tls::secure)
+            .transpose()
+            .map_err(BindError::Tls)?;
         let (engine, client, server) = match config.role {
             Role::Client { connect } => {
-                let client_config =
-                    client_role::client_config(connect, config.common_address, config.parameters)
-                        .map_err(BindError::Link)?;
+                // A client checks the station's certificate against the server name, or against
+                // the address it connects to.
+                let host = config
+                    .tls
+                    .as_ref()
+                    .and_then(|files| files.server_name.clone())
+                    .unwrap_or_else(|| connect.ip().to_string());
+                let client_config = client_role::client_config(
+                    connect,
+                    config.common_address,
+                    config.parameters,
+                    secure.map(|secure| (secure, host)),
+                )
+                .map_err(BindError::Link)?;
                 let client = Client::connect(client_config);
                 let (requests_tx, requests) = mpsc::channel(REQUEST_QUEUE);
                 let recorder = Arc::new(Recorder::new(config.event_capacity));
@@ -176,7 +197,7 @@ impl Runtime {
                     selection_timeout,
                     parameters: config.parameters,
                 };
-                let station = server_role::bind(listen, settings, points)
+                let station = server_role::bind(listen, settings, points, secure)
                     .await
                     .map_err(BindError::Station)?;
                 // The log keeps at least the default, so that a small stream queue loses events

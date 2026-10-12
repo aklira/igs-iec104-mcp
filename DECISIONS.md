@@ -869,3 +869,32 @@ test can show it.
   error for a policy that keeps nothing). `tests/unit/test_runtime_source.py` (two tests: a drop after the cursor is an
   `EventGap`, and a log that kept the events after the cursor is not). `tests/integration/test_mcp_report.py` and
   `test_mcp_run.py` pass on Podman, and a healthy run reports no gap.
+
+## D-041: TLS in the runtime, both roles (V1a)
+
+- Date: 2026-10-12 (task V1, first part: V1a).
+- Split: V1 is three parts. V1a (this decision): the runtime secures its connections, as a client and as a station, with
+  the upstream TLS settings. V1b: the controller delivers the certificate material through the archive interface and
+  the bench definition names it by `secret:` references. V1c: acceptance and rejection scenarios on Docker, and the
+  station's side of a refused handshake. V1 stays unticked until V1c passes.
+- Decision: the runtime takes `--tls-certificate`, `--tls-key`, and `--tls-trust`, all DER, together or not at all, and
+  `--tls-server-name` for a client only. The files build the upstream `Identity` and `TrustAnchors`, and the settings are
+  validated against the profile before the backend is built (`src/tls.rs`). A runtime whose TLS files are missing or
+  unusable does not start: `BindError::Tls` is returned before any port is bound. It never falls back to a plain
+  connection.
+- Client: the station's certificate is checked against the server name, or against the address the client connects to.
+  The certificate must carry that name (SAN). A refused handshake is `connect_failed` in the client's events, with the
+  backend's error, and the connection never comes up. The client keeps its reconnection policy, as for any failure.
+- Backend: the OpenSSL backend, the upstream default (feature `openssl`). The runtime image already installs `libssl-dev`
+  to build it and `libssl3t64` to run it (docker/runtime.Dockerfile).
+- Contract: no change. The ready body and the events are the same; a refused handshake uses the existing
+  `connect_failed` kind.
+- Not in V1a: the certificate chain beyond the leaf (an intermediate certificate is not sent yet); revocation lists; the
+  upstream security events (Annex A), which the runtime discards for now (`Discard`), so a security reason is not in the
+  journal; the station's record of a refused client (V1c); the controller's delivery and the bench definition (V1b).
+- Tests: `tests/tls.rs` (3 tests) makes a root, a station and a client certificate, and a second root, with the `openssl`
+  command line at test time, so openssl must be installed where these tests run (CI runners have it): a secured client
+  reaches a secured station and starts its transfer; a client that trusts another root is refused, with a `connect_failed`
+  that names the handshake; a runtime whose key file is missing does not start. `src/config.rs` (5 tests) checks the
+  option rules, and `src/tls.rs` (2 tests) the file and settings errors. The workspace tests, clippy with warnings as
+  errors, the format check, and `cargo deny` pass; the Python tests that drive the runtime binary pass with it.

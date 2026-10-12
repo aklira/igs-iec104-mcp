@@ -162,6 +162,7 @@ pub async fn bind(
     listen: SocketAddr,
     settings: StationSettings,
     points: Vec<PointSpec>,
+    secure: Option<igs_iec104::tls::Secure>,
 ) -> Result<Station, StationError> {
     let policies = points
         .iter()
@@ -178,6 +179,9 @@ pub async fn bind(
         .with_events(settings.event_capacity);
     config.selection_timeout = settings.selection_timeout;
     config.parameters = settings.parameters;
+    if let Some(secure) = secure {
+        config = config.with_tls(secure);
+    }
     let mut server = Server::bind(config, handler)
         .await
         .map_err(StationError::Bind)?;

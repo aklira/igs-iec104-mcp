@@ -68,6 +68,7 @@ impl Running {
             event_capacity: DEFAULT_EVENT_CAPACITY,
             parameters: Parameters::default(),
             control_token: token.0.clone(),
+            tls: None,
         };
         let runtime = Runtime::bind(config).await.expect("the runtime binds");
         let control = runtime.control_address();
