@@ -1,6 +1,7 @@
-# The independent peer of the interoperability tests (IMPLEMENTATION.md §13; task X3). It runs the
-# OpenMUC j60870 library (GNU GPL v3, https://www.openmuc.org/j60870/) as a black box: a station that
-# answers an interrogation for one point (Station.java). The library is fetched from Maven Central at a
+# The independent peer of the interoperability tests (IMPLEMENTATION.md §13; tasks X3a and X3b). It runs
+# the OpenMUC j60870 library (GNU GPL v3, https://www.openmuc.org/j60870/) as a black box: a station that
+# answers an interrogation for one point (Station.java, the default entrypoint), and a client that
+# interrogates a station and prints its points (Client.java, run with an entrypoint override). The library is fetched from Maven Central at a
 # pinned version, and its SHA-256 is checked against the value Maven Central publishes. This project
 # does not read, copy, or redistribute the library's sources; the image is built locally.
 #
@@ -17,8 +18,8 @@ ARG J60870_SHA256
 ADD https://repo1.maven.org/maven2/org/openmuc/j60870/${J60870_VERSION}/j60870-${J60870_VERSION}.jar /opt/peer/j60870.jar
 RUN echo "${J60870_SHA256}  /opt/peer/j60870.jar" | sha256sum -c - \
     && chmod 0644 /opt/peer/j60870.jar
-COPY Station.java /src/Station.java
-RUN javac -cp /opt/peer/j60870.jar -d /opt/peer/classes /src/Station.java
+COPY Station.java Client.java /src/
+RUN javac -cp /opt/peer/j60870.jar -d /opt/peer/classes /src/Station.java /src/Client.java
 
 FROM docker.io/library/eclipse-temurin@sha256:80b6aebe2f990697ada73fdbe451c7e9ec5e4adbde7a1e3625bc665e3b2fc06e
 RUN groupadd --system --gid 10003 peer \

@@ -558,7 +558,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - Depends: X1, X2, M2.
 - Produce: scenarios against at least one independent implementation, run as a black box (§2).
 - Done when: a maintainer reviews the results and the feature matrix.
-  Split (D-052): X3a, our client against the independent station, is done (D-052): the independent peer is the OpenMUC j60870 library as a black box, approved by the maintainer on 2026-10-12. X3b, the other direction and the scenarios through the planner, remains and needs a decision on how the planner reaches an external station. X3 stays open until the maintainer reviews the results and the feature matrix.
+  Split (D-052): X3a, our client against the independent station, is done (D-052): the independent peer is the OpenMUC j60870 library as a black box, approved by the maintainer on 2026-10-12. X3b, the independent client against a managed station over the bench network, is done (D-053). The planner is unchanged. What remains open: how an external client outside Docker reaches a published station without a pre-picked host port (D-053), and the maintainer's review of the results and the feature matrix. X3 stays open until both are done.
 
 ### Phase R — Reports and resilience (milestone 7)
 

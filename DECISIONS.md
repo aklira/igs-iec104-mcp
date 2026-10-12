@@ -1209,3 +1209,29 @@ test can show it.
   this project. The build reads the library from Maven Central; the program of this project that calls it is ours.
 - Tests: `tests/integration/test_interop_j60870.py` (one test, on Podman with the peer image `localhost/igs-iec104-j60870:1.8.0`
   and the runtime binary).
+
+## D-053: An independent client against a managed station, over the bench network (X3, second part: X3b)
+
+- Date: 2026-10-12 (task X3, second part: X3b). The maintainer chose option (b) of D-052.
+- Correction of D-052's wording: option (b) was described as the peer started as a managed instance of a second bench.
+  The planner runs only this project's runtime images, so a foreign image cannot be a managed instance without a planner
+  change. What was built keeps the planner unchanged: the managed station is an ordinary bench of one station, and the
+  independent client is a container that the test starts and removes, on the bench's network. The planner's rule for
+  external connections is not touched.
+- Decision: `docker/independent/Client.java` (a program of this project, using the library's public API as a black box)
+  connects to a station, starts the data transfer, sends a station interrogation, prints each point it receives, and
+  exits 0 when the interrogation ends. The peer image runs it with an entrypoint override; its default entrypoint is still
+  the station. The client joins the bench's network and reaches the station by its address there.
+- Not through a published port: a station published to the host (X2) needs a host port in the definition, and the X2 test
+  picks a free one just before the start, which the plan's rule on fixed or pre-picked ports does not allow. The X2 path
+  stays covered by its own test. An external client outside Docker, with the independent peer, needs the host port to be
+  chosen by the engine; that is a separate decision (see below).
+- Tests: `tests/integration/test_interop_j60870_client.py` (one test, on Podman): the bench starts one station with one
+  point; the peer's client runs on the bench network; its exit status is 0, its output names point 100 with value 12.5 and
+  the end of the interrogation; the station records the connection (`connected`); the bench is removed.
+- Limits: the scenarios of X3 run through the scenario engine only for this project's runtime; the peer is driven by the
+  test, not by a scenario step. Commands, reads, spontaneous updates, and the peer's own feature matrix are not covered.
+- Open decision for the maintainer: how an external client outside Docker reaches a published station without a
+  pre-picked host port. Options: the planner accepts `host_port: 0` and reports the port the engine chose (the same way
+  the runtime reports its control port), or the publication keeps the fixed port and the test accepts the documented race.
+  I recommend the first. X3 stays open until this is decided and the maintainer reviews the results and the feature matrix.

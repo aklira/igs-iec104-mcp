@@ -59,7 +59,7 @@ Desktop, with the same test suite, before a release.
 | Recovery after a server crash | supported | the run is `interrupted`; its bench is listed and removed by its run |
 | Streamable HTTP transport | supported on the loopback, with a token | `--transport http`; no remote listener and no TLS yet (see [setup](setup.md#http-transport)) |
 | Controlled faults (interruption, latency) | **not implemented** | waits for a maintainer's approval of the component (V3) |
-| Interoperability: our client with an independent station (OpenMUC j60870 1.8.0, black box) | supported in one direction, tested | `tests/integration/test_interop_j60870.py`; the other direction and the scenarios through the planner are not done (X3b) |
+| Interoperability with an independent implementation (OpenMUC j60870 1.8.0, black box) | supported in both directions on the bench network, tested | `tests/integration/test_interop_j60870.py` (our client, their station) and `test_interop_j60870_client.py` (their client, our station); an external client outside Docker is open (D-053) |
 
 ### What the runtime does not handle
 
