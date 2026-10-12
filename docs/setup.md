@@ -127,8 +127,68 @@ What the transport checks, and what it does not:
 
 ## Connect an MCP client
 
-Register the server in the client's configuration. Use absolute paths, and set `PYTHONPATH` to the `src`
-directory of the repository. For Podman, also set `DOCKER_HOST` to its socket:
+A client starts the server itself over stdio, which is the simplest setup. Every client needs the same four
+things: the Python interpreter of the virtual environment, `PYTHONPATH` set to the `src` directory, the project
+directory, and the identities of the two images. Use absolute paths, and replace the `/home/you/...` paths and
+the `sha256:<…>` placeholders with your own values.
+
+For Podman, add `DOCKER_HOST` with the socket path (see [Podman](#podman)). Docker Engine needs no such variable.
+
+### Claude Code
+
+Register the server for your user, so that it is available from any directory:
+
+```bash
+claude mcp add --scope user igs-iec104 \
+  -e PYTHONPATH=/home/you/igs-iec104-mcp/src \
+  -- /home/you/igs-iec104-mcp/.venv/bin/python -m igs_iec104_mcp \
+  --project /home/you/igs-project \
+  --runtime-image sha256:<runtime identity> \
+  --relay-image sha256:<relay identity>
+```
+
+Check the registration:
+
+```bash
+claude mcp list
+```
+
+`igs-iec104` should be listed as connected. In a Claude Code session, `/mcp` shows the state of the server.
+
+### Codex
+
+Register the server in Codex's configuration:
+
+```bash
+codex mcp add igs-iec104 \
+  --env PYTHONPATH=/home/you/igs-iec104-mcp/src \
+  -- /home/you/igs-iec104-mcp/.venv/bin/python -m igs_iec104_mcp \
+  --project /home/you/igs-project \
+  --runtime-image sha256:<runtime identity> \
+  --relay-image sha256:<relay identity>
+```
+
+The entry in `~/.codex/config.toml` has this form:
+
+```toml
+[mcp_servers.igs-iec104]
+command = "/home/you/igs-iec104-mcp/.venv/bin/python"
+args = [
+  "-m", "igs_iec104_mcp",
+  "--project", "/home/you/igs-project",
+  "--runtime-image", "sha256:<runtime identity>",
+  "--relay-image", "sha256:<relay identity>",
+]
+
+[mcp_servers.igs-iec104.env]
+PYTHONPATH = "/home/you/igs-iec104-mcp/src"
+```
+
+Check the registration with `codex mcp list`, then start Codex and ask it for the tools of `igs-iec104`.
+
+### Other clients
+
+A client that reads the common `mcpServers` JSON format takes this entry:
 
 ```json
 {
@@ -142,17 +202,60 @@ directory of the repository. For Podman, also set `DOCKER_HOST` to its socket:
         "--relay-image", "sha256:<relay identity>"
       ],
       "env": {
-        "PYTHONPATH": "/home/you/igs-iec104-mcp/src",
-        "DOCKER_HOST": "unix:///run/user/1000/podman/podman.sock"
+        "PYTHONPATH": "/home/you/igs-iec104-mcp/src"
       }
     }
   }
 }
 ```
 
-Omit `DOCKER_HOST` with Docker Engine. Once the client lists the tools, validate the example bench with
-`bench_validate` (its text is `examples/benches/basic-pair.yaml`), then store it with `bench_create`, and run
-`examples/scenarios/interrogation-and-spontaneous-update.yaml` with `scenario_run`.
+### HTTP transport with a client
+
+Use the HTTP transport when a client cannot start the server, or when one running server serves several clients. The
+server does not start with the client: start it first, in a terminal or as a user service, with the token file of
+[HTTP transport](#http-transport). It stops when you stop it. The client must run on the same machine, since the
+server listens on its loopback only.
+
+Codex reads the token from an environment variable when it starts, so the variable must be set in the shell that
+starts Codex:
+
+```bash
+export IGS_MCP_TOKEN="$(cat ~/igs-mcp-token)"
+codex mcp add igs-iec104-http --url http://127.0.0.1:8765/mcp --bearer-token-env-var IGS_MCP_TOKEN
+```
+
+Claude Code takes the header on the command line. The token is then stored in Claude Code's configuration file in
+your home directory, so keep that file as private as the token file:
+
+```bash
+claude mcp add --scope user --transport http igs-iec104-http http://127.0.0.1:8765/mcp \
+  --header "Authorization: Bearer $(cat ~/igs-mcp-token)"
+```
+
+### First steps
+
+Once the client lists the tools, run the example of the repository. Pass the content of each file as `text`.
+
+1. `bench_validate` with `examples/benches/basic-pair.yaml`: it reports the problems of the bench and stores nothing.
+2. `bench_create` with a name of your choice and the same text: the bench is stored.
+3. `scenario_validate` and `scenario_create` with `examples/scenarios/interrogation-and-spontaneous-update.yaml`.
+4. `scenario_run` with the scenario's name: it returns a run at once, with the status `running`. The bench starts in
+   the background, and the engine must be reachable.
+5. `run_get` for the status, `run_events` for the journal, and `run_report` with `format` set to `summary` once the
+   run has ended.
+
+The tool reference is in [tools](tools.md), and the bench and scenario formats are in [definitions](definitions.md).
+
+### When the client does not connect
+
+- The client reports that the server did not start. Run the command of its entry by hand in a terminal. The standard
+  output must carry only MCP messages; the diagnostics go to standard error. A missing `PYTHONPATH` is the usual cause.
+- `engine_unavailable`: the engine is not reachable. Check `DOCKER_HOST`, and that the Podman service runs.
+- Both `--runtime-image` and `--relay-image` take image identities (`sha256:` digests), not tags.
+- An HTTP request is refused with `401` (the token is wrong or missing), `403` (the `Origin` is not the loopback of
+  the server), or `421` (the `Host` is not the server's own name). Check the token file and the URL.
+
+More symptoms are in [troubleshooting](troubleshooting.md).
 
 ## Podman
 
