@@ -20,6 +20,14 @@ use crate::points;
 pub enum EventKind {
     /// The connection to the station is established.
     Connected,
+    /// The started station of a redundancy group changed: `from` was started before (none at the
+    /// first start), `to` is started now (IEC 60870-5-104 §10.5).
+    Switched {
+        /// The station started before, or none at the first start.
+        from: Option<usize>,
+        /// The station started now.
+        to: usize,
+    },
     /// The connection ended, with this error. The client reconnects.
     Disconnected {
         /// The error, as text.
@@ -157,6 +165,10 @@ pub struct Recorded {
     pub observed_at_ms: u64,
     /// The connection generation the event was recorded in: the number of connections so far.
     pub generation: u64,
+    /// The station of a redundancy group the event came from, in the order the stations were
+    /// given. None for a client of one station, and for an event of the group itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<usize>,
     /// The event.
     #[serde(flatten)]
     pub kind: EventKind,
@@ -184,12 +196,33 @@ impl EventLog {
 
     /// Records an event at the current time, in `generation`, and returns its sequence number.
     pub fn record(&mut self, kind: EventKind, generation: u64) -> u64 {
-        self.record_at(kind, now_ms(), generation)
+        self.record_from(kind, None, generation)
+    }
+
+    /// Records an event of the station `endpoint` of a redundancy group (or of the client, when
+    /// there is none), at the current time, in `generation`.
+    pub fn record_from(
+        &mut self,
+        kind: EventKind,
+        endpoint: Option<usize>,
+        generation: u64,
+    ) -> u64 {
+        self.record_observed(kind, now_ms(), endpoint, generation)
     }
 
     /// Records an event observed at `observed_at_ms`, in `generation`, and returns its sequence
     /// number.
     pub fn record_at(&mut self, kind: EventKind, observed_at_ms: u64, generation: u64) -> u64 {
+        self.record_observed(kind, observed_at_ms, None, generation)
+    }
+
+    fn record_observed(
+        &mut self,
+        kind: EventKind,
+        observed_at_ms: u64,
+        endpoint: Option<usize>,
+        generation: u64,
+    ) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
         if self.capacity == 0 {
@@ -204,6 +237,7 @@ impl EventLog {
             seq,
             observed_at_ms,
             generation,
+            endpoint,
             kind,
         });
         seq

@@ -32,6 +32,11 @@ fn view() -> AsduView {
 fn samples() -> Vec<EventKind> {
     vec![
         EventKind::Connected,
+        EventKind::Switched { from: None, to: 0 },
+        EventKind::Switched {
+            from: Some(0),
+            to: 1,
+        },
         EventKind::Disconnected {
             error: "the peer closed the connection".to_owned(),
         },
@@ -81,6 +86,7 @@ fn samples() -> Vec<EventKind> {
 fn definition_of(kind: &str) -> Option<&'static str> {
     Some(match kind {
         "connected" => "Connected",
+        "switched" => "Switched",
         "disconnected" => "Disconnected",
         "connect_failed" => "ConnectFailed",
         "discarded" => "Discarded",
@@ -240,6 +246,8 @@ fn the_schema_describes_every_kind_the_client_can_record() {
         })
         .collect();
     sampled.sort_unstable();
+    // Two samples of a switchover (with and without a first station) name one kind.
+    sampled.dedup();
     assert_eq!(
         declared, sampled,
         "the schema and the runtime name the same kinds"
@@ -373,4 +381,18 @@ fn the_station_schema_describes_every_kind_the_station_records() {
         .collect();
     sampled.sort_unstable();
     assert_eq!(declared, sampled);
+}
+
+#[test]
+fn an_event_of_a_group_station_names_the_station_and_matches_the_schema() {
+    let schema = schema();
+    let mut log = EventLog::new(4);
+    log.record_from(EventKind::Connected, Some(1), 2);
+    let recorded = log.after(0).pop().expect("the event is kept");
+    let event = serde_json::to_value(&recorded).expect("the event is JSON");
+    assert_eq!(event["endpoint"], 1);
+    let fragment = &schema["$defs"]["Connected"];
+    if let Err(error) = check(&schema, fragment, &event) {
+        panic!("the station's event does not match its definition: {error}: {event}");
+    }
 }

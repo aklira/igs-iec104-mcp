@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use igs_iec104::procedures;
+use igs_iec104::redundancy::{RedundancyError, RedundancyEvent, RedundantClient};
 use igs_iec104::tls::Secure;
 use igs_iec104::{Client, ClientConfig, Delivery, Event, OfflineRequests};
 use igs_iec104_codec::asdu::Asdu;
@@ -40,11 +41,28 @@ pub const INTERROGATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// The state of the connection and of the data transfer, as the control API reports it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Status {
-    /// `down` until the connection is established, then `up`.
+    /// `down` until a connection is established, then `up`. A group is `up` while one of its
+    /// stations is connected.
     pub connection: &'static str,
-    /// The state of the data transfer, as in [`EventKind::Transfer`]. `stopped` while the
-    /// connection is down.
+    /// The state of the data transfer of the started station, as in [`EventKind::Transfer`].
+    /// `stopped` while the connection is down.
     pub transfer: &'static str,
+    /// The stations of the client: one for a client of one station, more for a redundancy group.
+    pub endpoints: usize,
+    /// The station whose data transfer is started: always `None` for a client of one station.
+    pub started: Option<usize>,
+    /// The number of stations connected now.
+    pub connected: usize,
+}
+
+impl Status {
+    /// The state of a client with `endpoints` stations, none of them connected.
+    pub fn new(endpoints: usize) -> Self {
+        Self {
+            endpoints,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for Status {
@@ -52,6 +70,9 @@ impl Default for Status {
         Self {
             connection: "down",
             transfer: "stopped",
+            endpoints: 1,
+            started: None,
+            connected: 0,
         }
     }
 }
@@ -70,11 +91,11 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// A recorder that keeps `capacity` events.
-    pub fn new(capacity: usize) -> Self {
+    /// A recorder that keeps `capacity` events, for a client of `endpoints` stations.
+    pub fn new(capacity: usize, endpoints: usize) -> Self {
         Self {
             log: Mutex::new(EventLog::new(capacity)),
-            status: Mutex::new(Status::default()),
+            status: Mutex::new(Status::new(endpoints)),
             correlation: Mutex::new(Correlator::new()),
             image: Mutex::new(PointImage::default()),
         }
@@ -156,9 +177,92 @@ pub fn client_config(
     Ok(config)
 }
 
+/// The link of the client: one connection to one station, or a redundancy group of stations
+/// (IEC 60870-5-104 §10). The group starts the data transfer of one station, and switches to
+/// another when that one is lost.
+pub enum Link {
+    /// One station: the client as the runtime has always run it.
+    Single(Client),
+    /// Several stations, in the order they were given.
+    Group(RedundantClient),
+}
+
+/// What the link delivers: an event of a station (the station's index, in a group), or a
+/// switchover of a group.
+#[derive(Debug)]
+pub enum Observed {
+    /// An event of the client, or of the station at `endpoint` in a group.
+    Event {
+        /// The station, in a group. None for a client of one station.
+        endpoint: Option<usize>,
+        /// The event.
+        event: Event,
+    },
+    /// The started station changed: `from` was started before, none at the first start.
+    Switched {
+        /// The station started before.
+        from: Option<usize>,
+        /// The station started now.
+        to: usize,
+    },
+}
+
+impl Link {
+    /// The link to the stations, one connection each. One station is a client of it alone.
+    pub fn connect(mut configs: Vec<ClientConfig>) -> Result<Self, RedundancyError> {
+        if configs.len() == 1 {
+            if let Some(config) = configs.pop() {
+                return Ok(Self::Single(Client::connect(config)));
+            }
+        }
+        Ok(Self::Group(RedundantClient::connect(configs)?))
+    }
+
+    /// The next thing the link delivers. `None` once the link has stopped.
+    pub async fn next(&mut self) -> Option<Observed> {
+        match self {
+            Self::Single(client) => client.next_event().await.map(|event| Observed::Event {
+                endpoint: None,
+                event,
+            }),
+            Self::Group(group) => group.next_event().await.map(|change| match change {
+                RedundancyEvent::Endpoint { index, event } => Observed::Event {
+                    endpoint: Some(index),
+                    event,
+                },
+                RedundancyEvent::Switched { from, to } => Observed::Switched { from, to },
+            }),
+        }
+    }
+
+    /// Hands an ASDU to the started connection. A group with no started station refuses it, since
+    /// there is no connection to send on.
+    async fn send_asdu(&self, asdu: Asdu) -> Result<(), Refusal> {
+        match self {
+            Self::Single(client) => client.send_asdu(asdu).await.map_err(|_| Refusal::Stopped),
+            Self::Group(group) => group.send_asdu(asdu).await.map_err(|error| match error {
+                RedundancyError::NoStartedConnection => Refusal::NotStarted,
+                _ => Refusal::Stopped,
+            }),
+        }
+    }
+
+    /// Starts the data transfer. A group starts the transfer of the station it starts itself, so
+    /// there is nothing to ask: the transfer state shows when it starts.
+    async fn start_transfer(&self) -> Result<(), Refusal> {
+        match self {
+            Self::Single(client) => client
+                .start_data_transfer()
+                .await
+                .map_err(|_| Refusal::Stopped),
+            Self::Group(_) => Ok(()),
+        }
+    }
+}
+
 /// Runs the client until its requests end or the client stops.
 pub async fn run(
-    mut client: Client,
+    mut link: Link,
     mut requests: mpsc::Receiver<Request>,
     recorder: Arc<Recorder>,
     common_address: CommonAddress,
@@ -166,12 +270,12 @@ pub async fn run(
     loop {
         let due = lock(&recorder.correlation).next_deadline();
         tokio::select! {
-            event = client.next_event() => match event {
-                Some(event) => record(&recorder, &event),
+            observed = link.next() => match observed {
+                Some(observed) => record(&recorder, observed),
                 None => break,
             },
             request = requests.recv() => match request {
-                Some(request) => answer(&client, &recorder, common_address, request).await,
+                Some(request) => answer(&link, &recorder, common_address, request).await,
                 None => break,
             },
             () = until(due) => {
@@ -196,20 +300,17 @@ fn now() -> std::time::Instant {
 }
 
 /// Makes the request of the control API, and sends back its answer.
-async fn answer(client: &Client, recorder: &Recorder, common: CommonAddress, request: Request) {
+async fn answer(link: &Link, recorder: &Recorder, common: CommonAddress, request: Request) {
     match request {
         Request::StartTransfer(reply) => {
-            let result = client
-                .start_data_transfer()
-                .await
-                .map_err(|_| Refusal::Stopped);
+            let result = link.start_transfer().await;
             let _ = reply.send(result);
         }
         Request::Interrogate(reply) => {
             let result = match procedures::interrogation(common, Qoi::STATION) {
                 Ok(asdu) => {
                     let kind = Kind::Interrogation;
-                    submit(client, recorder, kind, asdu, INTERROGATION_TIMEOUT).await
+                    submit(link, recorder, kind, asdu, INTERROGATION_TIMEOUT).await
                 }
                 Err(error) => Err(Refusal::Invalid(error.to_string())),
             };
@@ -219,7 +320,7 @@ async fn answer(client: &Client, recorder: &Recorder, common: CommonAddress, req
             let result = match counter_interrogation(common, group) {
                 Ok(asdu) => {
                     let kind = Kind::CounterInterrogation;
-                    submit(client, recorder, kind, asdu, INTERROGATION_TIMEOUT).await
+                    submit(link, recorder, kind, asdu, INTERROGATION_TIMEOUT).await
                 }
                 Err(refusal) => Err(refusal),
             };
@@ -233,7 +334,7 @@ async fn answer(client: &Client, recorder: &Recorder, common: CommonAddress, req
             reply,
         } => {
             let result = if transfer_name(recorder) == "started" {
-                single_command(client, recorder, common, address, on, select, timeout).await
+                single_command(link, recorder, common, address, on, select, timeout).await
             } else {
                 Err(Refusal::NotStarted)
             };
@@ -262,7 +363,7 @@ fn counter_interrogation(common: CommonAddress, group: u8) -> Result<Asdu, Refus
 }
 
 async fn single_command(
-    client: &Client,
+    link: &Link,
     recorder: &Recorder,
     common: CommonAddress,
     address: InformationObjectAddress,
@@ -275,7 +376,7 @@ async fn single_command(
     let asdu = procedures::single_command(common, address, command, None)
         .map_err(|error| Refusal::Invalid(error.to_string()))?;
     submit(
-        client,
+        link,
         recorder,
         Kind::SingleCommand { select },
         asdu,
@@ -287,7 +388,7 @@ async fn single_command(
 /// Accepts a request in the correlator, then hands its ASDU to the client. The request is accepted
 /// before the ASDU is handed over, so that the events that follow it find it.
 async fn submit(
-    client: &Client,
+    link: &Link,
     recorder: &Recorder,
     kind: Kind,
     asdu: igs_iec104_codec::asdu::Asdu,
@@ -296,12 +397,12 @@ async fn submit(
     let id = lock(&recorder.correlation)
         .submit(kind, asdu.clone(), now(), timeout)
         .map_err(refusal_of)?;
-    if client.send_asdu(asdu).await.is_err() {
-        // The client has stopped, so the ASDU will not leave: the request is cancelled.
+    if let Err(refusal) = link.send_asdu(asdu).await {
+        // The ASDU will not leave, so the request is cancelled.
         if let Ok(finished) = lock(&recorder.correlation).cancel(id) {
             finish(recorder, &[finished]);
         }
-        return Err(Refusal::Stopped);
+        return Err(refusal);
     }
     Ok(id)
 }
@@ -319,30 +420,65 @@ pub fn transfer_name(recorder: &Recorder) -> &'static str {
     lock(&recorder.status).transfer
 }
 
-/// Records an event of the client, with the connection generation it belongs to, and the verdicts
-/// it decides.
-fn record(recorder: &Recorder, event: &Event) {
+/// Records what the link delivers: an event, or a switchover.
+fn record(recorder: &Recorder, observed: Observed) {
+    match observed {
+        Observed::Event { endpoint, event } => record_event(recorder, endpoint, &event),
+        Observed::Switched { from, to } => record_switch(recorder, from, to),
+    }
+}
+
+/// Records a switchover. The requests written on the connection that was started end as they
+/// would at its loss, and a new connection generation begins with the started station.
+fn record_switch(recorder: &Recorder, from: Option<usize>, to: usize) {
+    let ended = {
+        let mut correlation = lock(&recorder.correlation);
+        let ended = correlation.disconnected();
+        correlation.connected();
+        ended
+    };
+    let kind = EventKind::Switched { from, to };
+    update(&mut lock(&recorder.status), &kind, None);
+    let generation = generation(recorder);
+    push(recorder, kind, None, generation);
+    finish(recorder, &ended);
+}
+
+/// Records an event of the client, or of a station of a group, with the connection generation it
+/// belongs to, and the verdicts it decides. Only the started connection carries requests: an event
+/// of a standby station is recorded, and leaves the correlator to the started connection.
+fn record_event(recorder: &Recorder, endpoint: Option<usize>, event: &Event) {
     let kind = kind_of(event);
+    let standby = endpoint.is_some_and(|index| lock(&recorder.status).started != Some(index));
     let mut ended = Vec::new();
     let generation = match event {
         Event::Connected => {
+            // A standby connection is not a new generation: the switchover starts one.
             let mut correlation = lock(&recorder.correlation);
-            correlation.connected();
+            if endpoint.is_none() {
+                correlation.connected();
+            }
             correlation.generation()
         }
         Event::Disconnected(_) => {
             let mut correlation = lock(&recorder.correlation);
-            ended = correlation.disconnected();
+            if !standby {
+                ended = correlation.disconnected();
+            }
             correlation.generation()
         }
         Event::Discarded(command) => {
             let mut correlation = lock(&recorder.correlation);
-            ended = correlation.discarded(command);
+            if !standby {
+                ended = correlation.discarded(command);
+            }
             correlation.generation()
         }
         Event::Delivery(Delivery::Transmitted(asdu)) => {
             let mut correlation = lock(&recorder.correlation);
-            correlation.transmitted(asdu);
+            if !standby {
+                correlation.transmitted(asdu);
+            }
             correlation.generation()
         }
         _ => generation(recorder),
@@ -350,13 +486,15 @@ fn record(recorder: &Recorder, event: &Event) {
     if let Event::Delivery(Delivery::Asdu(asdu)) = event {
         lock(&recorder.image).observe(asdu, generation, now_ms());
     }
-    update(&mut lock(&recorder.status), &kind);
-    push(recorder, kind, generation);
+    update(&mut lock(&recorder.status), &kind, endpoint);
+    push(recorder, kind, endpoint, generation);
     if let Event::Delivery(Delivery::Asdu(asdu)) = event {
         for point in points_of(asdu) {
-            push(recorder, point, generation);
+            push(recorder, point, endpoint, generation);
         }
-        ended = lock(&recorder.correlation).answer(asdu);
+        if !standby {
+            ended = lock(&recorder.correlation).answer(asdu);
+        }
     }
     finish(recorder, &ended);
 }
@@ -370,12 +508,12 @@ fn generation(recorder: &Recorder) -> u64 {
 pub fn finish(recorder: &Recorder, ended: &[Finished]) {
     for finished in ended {
         let kind = verdict_of(finished);
-        push(recorder, kind, generation(recorder));
+        push(recorder, kind, None, generation(recorder));
     }
 }
 
-fn push(recorder: &Recorder, kind: EventKind, generation: u64) {
-    lock(&recorder.log).record(kind, generation);
+fn push(recorder: &Recorder, kind: EventKind, endpoint: Option<usize>, generation: u64) {
+    lock(&recorder.log).record_from(kind, endpoint, generation);
 }
 
 fn verdict_of(finished: &Finished) -> EventKind {
@@ -393,14 +531,34 @@ fn verdict_of(finished: &Finished) -> EventKind {
     }
 }
 
-fn update(status: &mut Status, kind: &EventKind) {
+/// The state of the connection and of the transfer, as the events of the client or of a station of
+/// a group change it. The transfer follows the started station only.
+fn update(status: &mut Status, kind: &EventKind, endpoint: Option<usize>) {
+    let started = endpoint.is_none() || endpoint == status.started;
     match kind {
-        EventKind::Connected => status.connection = "up",
-        EventKind::Disconnected { .. } | EventKind::ConnectFailed { .. } => {
-            status.connection = "down";
-            status.transfer = "stopped";
+        EventKind::Connected => {
+            status.connected += 1;
+            status.connection = "up";
         }
-        EventKind::Transfer { state } => status.transfer = state,
+        EventKind::Switched { to, .. } => status.started = Some(*to),
+        EventKind::Disconnected { .. } => {
+            status.connected = status.connected.saturating_sub(1);
+            if status.connected == 0 {
+                status.connection = "down";
+            }
+            if started {
+                status.transfer = "stopped";
+            }
+            if endpoint.is_some() && endpoint == status.started {
+                status.started = None;
+            }
+        }
+        EventKind::ConnectFailed { .. } => {
+            if started {
+                status.transfer = "stopped";
+            }
+        }
+        EventKind::Transfer { state } if started => status.transfer = state,
         _ => {}
     }
 }
@@ -467,15 +625,16 @@ mod tests {
     #[test]
     fn the_connection_and_the_transfer_follow_their_events() {
         let mut status = Status::default();
-        update(&mut status, &EventKind::Connected);
+        update(&mut status, &EventKind::Connected, None);
         assert_eq!(status.connection, "up");
-        update(&mut status, &EventKind::Transfer { state: "started" });
+        update(&mut status, &EventKind::Transfer { state: "started" }, None);
         assert_eq!(status.transfer, "started");
         update(
             &mut status,
             &EventKind::Disconnected {
                 error: "lost".to_owned(),
             },
+            None,
         );
         assert_eq!(status, Status::default());
     }

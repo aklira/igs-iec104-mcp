@@ -18,14 +18,18 @@ const MAX_SELECTION_TIMEOUT_MS: u64 = 600_000;
 const MAX_EVENT_CAPACITY: usize = 1_000_000;
 /// The largest common address of a station: 65535 is the global address, which a station refuses.
 const MAX_COMMON_ADDRESS: u16 = 65534;
+/// The most stations a client connects to: a redundancy group of this size at most.
+pub const MAX_ENDPOINTS: usize = 8;
 
 /// What the runtime runs as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Role {
-    /// A client of one station.
+    /// A client of one station, or of a redundancy group of stations (IEC 60870-5-104 §10): the
+    /// group starts the first station that connects, and switches to another when it is lost.
     Client {
-        /// The address of the station the client connects to.
-        connect: SocketAddr,
+        /// The addresses of the stations, in the order they were given: one or more, up to
+        /// [`MAX_ENDPOINTS`].
+        connect: Vec<SocketAddr>,
     },
     /// A station serving the points of a file.
     Server {
@@ -167,7 +171,8 @@ impl std::error::Error for ConfigError {}
 pub const USAGE: &str =
     "usage: igs-iec104-runtime (--connect ADDRESS | --listen ADDRESS --points FILE) [options]
 
-  --connect ADDRESS         run a client of the station at ADDRESS, for example 127.0.0.1:2404
+  --connect ADDRESS         run a client of the station at ADDRESS, for example 127.0.0.1:2404;
+                            repeat it, up to 8 times, for a redundancy group
   --listen ADDRESS          run a station listening on ADDRESS, for example 127.0.0.1:2404
   --points FILE             the points of the station (JSON, see the runtime documentation)
   --common-address N        the common address of the station, 1 to 65534 (default 1)
@@ -201,7 +206,7 @@ where
         return Ok(Invocation::Banner);
     }
 
-    let mut connect = None;
+    let mut connect: Vec<SocketAddr> = Vec::new();
     let mut listen = None;
     let mut points = None;
     let mut common_address = 1;
@@ -219,7 +224,7 @@ where
         match argument.as_str() {
             "-h" | "--help" => return Ok(Invocation::Usage),
             "--connect" => {
-                connect = Some(address("--connect", value("--connect", &mut arguments)?)?);
+                connect.push(address("--connect", value("--connect", &mut arguments)?)?);
             }
             "--listen" => {
                 listen = Some(address("--listen", value("--listen", &mut arguments)?)?);
@@ -281,20 +286,26 @@ where
         }
     }
 
-    let link_role = match (connect.is_some(), listen.is_some()) {
+    let link_role = match (!connect.is_empty(), listen.is_some()) {
         (true, false) => LinkRole::Controlling,
         _ => LinkRole::Controlled,
     };
-    let role = match (connect, listen) {
-        (Some(_), Some(_)) => return Err(ConfigError::ConflictingRoles),
-        (None, None) => return Err(ConfigError::MissingRole),
-        (Some(connect), None) => {
+    let role = match (connect.is_empty(), listen) {
+        (false, Some(_)) => return Err(ConfigError::ConflictingRoles),
+        (true, None) => return Err(ConfigError::MissingRole),
+        (false, None) => {
+            if connect.len() > MAX_ENDPOINTS {
+                return Err(ConfigError::Invalid {
+                    option: "--connect",
+                    value: format!("{} stations", connect.len()),
+                });
+            }
             if points.is_some() {
                 return Err(ConfigError::PointsWithClient);
             }
             Role::Client { connect }
         }
-        (None, Some(listen)) => Role::Server {
+        (true, Some(listen)) => Role::Server {
             listen,
             points: points.ok_or(ConfigError::MissingPoints)?,
             selection_timeout: Duration::from_millis(selection_timeout_ms),
@@ -442,7 +453,7 @@ mod tests {
         assert_eq!(
             config.role,
             Role::Client {
-                connect: "127.0.0.1:2404".parse().expect("address"),
+                connect: vec!["127.0.0.1:2404".parse().expect("address")],
             }
         );
         assert_eq!(config.common_address, 1);
@@ -791,5 +802,37 @@ mod tests {
             run(&["--connect", "127.0.0.1:2404", "--tls-intermediate", "i.der"]),
             Err(ConfigError::IntermediateWithoutTls)
         );
+    }
+
+    #[test]
+    fn a_client_takes_the_stations_of_a_redundancy_group_in_order() {
+        let config =
+            run(&["--connect", "127.0.0.1:2404", "--connect", "127.0.0.1:2405"]).expect("valid");
+        assert_eq!(
+            config.role,
+            Role::Client {
+                connect: vec![
+                    "127.0.0.1:2404".parse().expect("address"),
+                    "127.0.0.1:2405".parse().expect("address"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn a_group_is_at_most_eight_stations() {
+        let mut list: Vec<String> = Vec::new();
+        for port in 0..=MAX_ENDPOINTS {
+            list.push("--connect".to_owned());
+            list.push(format!("127.0.0.1:{}", 2404 + port));
+        }
+        let refs: Vec<&str> = list.iter().map(String::as_str).collect();
+        assert!(matches!(
+            run(&refs),
+            Err(ConfigError::Invalid {
+                option: "--connect",
+                ..
+            })
+        ));
     }
 }

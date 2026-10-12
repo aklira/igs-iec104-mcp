@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "igs-iec104-runtime events",
   "description": "An event of the client role, as the control API reports it (GET /v1/events). Versioned with runtime-api.yaml: both carry the same contract version.",
-  "$comment": "contract version 1.8.0",
+  "$comment": "contract version 1.9.0",
   "$ref": "#/$defs/Event",
   "$defs": {
     "Event": {
@@ -43,6 +43,9 @@
         },
         {
           "$ref": "#/$defs/Verdict"
+        },
+        {
+          "$ref": "#/$defs/Switched"
         }
       ]
     },
@@ -72,6 +75,11 @@
         },
         "kind": {
           "const": "connected"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -107,6 +115,11 @@
         "error": {
           "type": "string",
           "description": "The error that ended the connection, as text."
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -141,6 +154,11 @@
         },
         "error": {
           "type": "string"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -176,6 +194,11 @@
         "command": {
           "type": "string",
           "description": "The request, as text. It was not sent."
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -210,6 +233,11 @@
         },
         "state": {
           "$ref": "#/$defs/TransferState"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -244,6 +272,11 @@
         },
         "asdu": {
           "$ref": "#/$defs/AsduView"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -345,6 +378,11 @@
           ],
           "pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}$",
           "description": "The time tag, for a time-tagged type. The CP56Time2a year is read as 2000 plus it."
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -379,6 +417,11 @@
         },
         "asdu": {
           "$ref": "#/$defs/AsduView"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -414,6 +457,11 @@
         "detail": {
           "type": "string",
           "description": "Why a request was not carried out, as text."
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -451,6 +499,11 @@
           "items": {
             "$ref": "#/$defs/AsduView"
           }
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -481,6 +534,11 @@
         },
         "kind": {
           "const": "closed"
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
         }
       },
       "additionalProperties": false
@@ -610,6 +668,56 @@
           ],
           "minimum": 0,
           "description": "The connection generation the request was written on, if it was."
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station of a redundancy group the event came from, in the order the stations were given. Absent for a client of one station, and for an event of the group itself."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Switched": {
+      "type": "object",
+      "required": [
+        "seq",
+        "observed_at_ms",
+        "generation",
+        "kind",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sequence number, from 1, with no gap while the events are kept."
+        },
+        "observed_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Time the event was recorded: milliseconds since the Unix epoch, UTC."
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The connection generation the event was recorded in."
+        },
+        "kind": {
+          "const": "switched"
+        },
+        "from": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "The station started before, or null at the first start."
+        },
+        "to": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The station started now."
         }
       },
       "additionalProperties": false

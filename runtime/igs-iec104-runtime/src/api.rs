@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
-use crate::client_role::{self, Refusal, Request as ClientRequest, Status};
+use crate::client_role::{self, Refusal, Request as ClientRequest};
 use crate::correlation::{CancelError, Outcome, View};
 use crate::events::Recorded;
 use crate::image::{time_text, Point};
@@ -80,13 +80,12 @@ async fn ready(State(shared): State<Arc<Shared>>) -> Json<Value> {
         "contract": crate::CONTRACT_VERSION,
     });
     if let Some(client) = &shared.client {
-        let Status {
-            connection,
-            transfer,
-        } = lock(&client.recorder.status).clone();
+        let status = lock(&client.recorder.status).clone();
         body["role"] = json!("client");
-        body["connection"] = json!(connection);
-        body["transfer"] = json!(transfer);
+        body["connection"] = json!(status.connection);
+        body["transfer"] = json!(status.transfer);
+        body["endpoints"] = json!(status.endpoints);
+        body["started_endpoint"] = json!(status.started);
     }
     if let Some(station) = &shared.server {
         body["role"] = json!("station");

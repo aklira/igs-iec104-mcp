@@ -111,7 +111,9 @@ struct Client {
 impl Client {
     async fn start(station: SocketAddr, token: &TokenFile) -> Self {
         let config = Config {
-            role: Role::Client { connect: station },
+            role: Role::Client {
+                connect: vec![station],
+            },
             common_address: 1,
             control: DEFAULT_CONTROL,
             event_capacity: DEFAULT_EVENT_CAPACITY,

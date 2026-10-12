@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: igs-iec104-runtime control API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     The control API of one runtime, used by the controller only (IMPLEMENTATION.md §3). A runtime runs as a client of one station or as a station. Every route needs the control token. A request to the client is acknowledged when it is queued (202), with its identity; its outcome comes as events, and as its request record. The events are described by events.schema.json, which carries the same contract version.
 servers:
@@ -367,7 +367,7 @@ components:
     ClientReady:
       type: object
       additionalProperties: false
-      required: [ready, role, control_address, contract, connection, transfer]
+      required: [ready, role, control_address, contract, connection, transfer, endpoints, started_endpoint]
       properties:
         ready:
           const: true
@@ -382,6 +382,14 @@ components:
           enum: [down, up]
         transfer:
           $ref: events.schema.json#/$defs/TransferState
+        endpoints:
+          type: integer
+          minimum: 1
+          description: The stations of the client, one for a client of one station, more for a redundancy group.
+        started_endpoint:
+          type: [integer, 'null']
+          minimum: 0
+          description: The station of a group whose data transfer is started, or null while none is. Always null for a client of one station.
     StationReady:
       type: object
       additionalProperties: false
@@ -403,7 +411,7 @@ components:
     ContractVersion:
       type: string
       description: The version of this contract, the same as the version of events.schema.json.
-      const: 1.8.0
+      const: 1.9.0
     Accepted:
       type: object
       additionalProperties: false

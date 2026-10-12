@@ -963,3 +963,35 @@ test can show it.
   `tests/integration/test_docker_tls_scenarios.py` runs two scenarios through the run engine on Podman: the acceptance
   passes with its three verdicts, and the rejection passes because its station records the alarm. Both benches are
   removed.
+
+## D-044: A client of a redundancy group in the runtime (V2a)
+
+- Date: 2026-10-12 (task V2, first part: V2a).
+- Split: V2 is three parts. V2a (this decision): the runtime's client role takes several stations, as a redundancy
+  group (§10). V2b: the bench model and the planner accept one client with several stations. V2c: a managed station
+  can be stopped without a restart (stop only, with its evidence kept), and scenarios check the switchover on Docker.
+- Decision: `--connect` may repeat, up to eight times. One station runs the upstream `Client` as before, so the
+  behaviour of a client of one station does not change. Several stations run the upstream `RedundantClient`: the group
+  starts the data transfer of the first station that connects (with its station interrogation), and switches to another
+  connected station when the started one is lost, interrogating it too (§10.5). The library does this; the runtime
+  reports it.
+- Events: a switchover is a `switched` event (`from`, `to`; `from` is null at the first start). The events of a station of
+  a group carry its index as `endpoint`, in the order the stations were given. A standby station's connection changes
+  are recorded and do not touch the correlator. The correlator follows the started connection only: its connection
+  generation begins at each switchover, and a request written on the old connection and unanswered ends `indeterminate`.
+- Ready: a client reports `endpoints` (its station count) and `started_endpoint` (the started station, or null; always
+  null for one station). The connection is `up` while any station is connected; the transfer follows the started one.
+- Commands and requests go to the started station. With none started, a request is refused as not started.
+- Transfer start in a group: the group starts the transfer of the station it starts, so `POST /v1/transfer/start` is
+  accepted and changes nothing. The transfer state shows when it starts.
+- Contract 1.9.0: the `switched` event; an optional `endpoint` on every client event; `endpoints` and `started_endpoint`
+  in the client's ready body.
+- Not in V2a: the bench model and planner for one client with several stations (V2b); stopping a managed station and the
+  scenarios of the switchover on Docker (V2c); a manual switchover through the control API (the library's `switch_to`
+  is not exposed yet).
+- Tests: `tests/redundancy.rs` (one test: two stations serve the same point; the client starts one, that station is
+  stopped, the client switches to the other: its `switched` event, the disconnection that names the lost station's
+  index, the transfer on the other station, and the value in the client's image after the interrogation). The config
+  tests (repeated `--connect`, the limit of eight), the contract tests (the `switched` sample; an event naming its
+  station). The existing runtime suites pass unchanged, so a client of one station is unaffected. The Docker tests of a
+  client of one station pass with the rebuilt image.

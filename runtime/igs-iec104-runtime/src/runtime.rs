@@ -16,13 +16,12 @@ use std::time::Duration;
 use igs_iec104::server::{ServerEvent, ServerEvents, ServerHandle, ShutdownReport};
 use igs_iec104::tls::events::{Discard, SecurityEvents};
 use igs_iec104::tls::Secure;
-use igs_iec104::Client;
 use igs_iec104_codec::header::CommonAddress;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use crate::client_role::{self, transfer_name_of, Recorder, Request};
+use crate::client_role::{self, transfer_name_of, Link, Recorder, Request};
 use crate::config::{Config, Role, TlsFiles, DEFAULT_EVENT_CAPACITY};
 use crate::points::{self, PointError, PointSpec};
 use crate::server_role::{self, CommandRecord, Policy, StationError, StationSettings};
@@ -91,7 +90,7 @@ struct StationParts {
 /// What the role runs, until the runtime serves.
 enum Engine {
     Client {
-        client: Client,
+        client: Link,
         requests: mpsc::Receiver<Request>,
         recorder: Arc<Recorder>,
         common_address: CommonAddress,
@@ -125,6 +124,8 @@ pub enum BindError {
     Link(igs_iec104_link::ConfigError),
     /// The TLS files cannot secure the connections.
     Tls(TlsSetupError),
+    /// The redundancy group of stations cannot be started.
+    Group(igs_iec104::redundancy::RedundancyError),
 }
 
 impl fmt::Display for BindError {
@@ -136,6 +137,7 @@ impl fmt::Display for BindError {
             Self::Station(error) => write!(f, "{error}"),
             Self::Token(error) => write!(f, "{error}"),
             Self::Tls(error) => write!(f, "{error}"),
+            Self::Group(error) => write!(f, "{error}"),
         }
     }
 }
@@ -153,34 +155,43 @@ impl Runtime {
         let (engine, client, server) = match config.role {
             Role::Client { connect } => {
                 let secure = secured(config.tls.as_ref(), Arc::new(Discard))?;
-                // A client checks the station's certificate against the server name, or against
-                // the address it connects to.
-                let host = config
+                let server_name = config
                     .tls
                     .as_ref()
-                    .and_then(|files| files.server_name.clone())
-                    .unwrap_or_else(|| connect.ip().to_string());
-                let client_config = client_role::client_config(
-                    connect,
-                    config.common_address,
-                    config.parameters,
-                    secure.map(|secure| (secure, host)),
-                )
-                .map_err(BindError::Link)?;
-                let client = Client::connect(client_config);
+                    .and_then(|files| files.server_name.clone());
+                // One connection per station, each with its own TLS wrapper. A client checks a
+                // station's certificate against the server name, or against the address it
+                // connects to.
+                let mut configs = Vec::with_capacity(connect.len());
+                for address in &connect {
+                    let host = server_name
+                        .clone()
+                        .unwrap_or_else(|| address.ip().to_string());
+                    let secured = secure.clone().map(|secure| (secure, host));
+                    configs.push(
+                        client_role::client_config(
+                            *address,
+                            config.common_address,
+                            config.parameters,
+                            secured,
+                        )
+                        .map_err(BindError::Link)?,
+                    );
+                }
+                let link = Link::connect(configs).map_err(BindError::Group)?;
                 let (requests_tx, requests) = mpsc::channel(REQUEST_QUEUE);
-                let recorder = Arc::new(Recorder::new(config.event_capacity));
-                let link = ClientLink {
+                let recorder = Arc::new(Recorder::new(config.event_capacity, connect.len()));
+                let client_link = ClientLink {
                     recorder: Arc::clone(&recorder),
                     requests: requests_tx,
                 };
                 let engine = Engine::Client {
-                    client,
+                    client: link,
                     requests,
                     recorder,
                     common_address: CommonAddress::new(config.common_address),
                 };
-                (engine, Some(link), None)
+                (engine, Some(client_link), None)
             }
             Role::Server {
                 listen,

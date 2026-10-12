@@ -310,7 +310,14 @@ async fn station(pki: &Pki, token: &TokenFile, tls: Option<TlsFiles>) -> Running
 }
 
 async fn client(station: SocketAddr, token: &TokenFile, tls: Option<TlsFiles>) -> Running {
-    let running = Running::start(config(Role::Client { connect: station }, token, tls)).await;
+    let running = Running::start(config(
+        Role::Client {
+            connect: vec![station],
+        },
+        token,
+        tls,
+    ))
+    .await;
     running
 }
 

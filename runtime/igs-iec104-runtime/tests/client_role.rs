@@ -59,7 +59,9 @@ async fn station() -> SocketAddr {
 
 fn config(connect: SocketAddr, token: &TokenFile) -> Config {
     Config {
-        role: Role::Client { connect },
+        role: Role::Client {
+            connect: vec![connect],
+        },
         common_address: 1,
         control: DEFAULT_CONTROL,
         event_capacity: DEFAULT_EVENT_CAPACITY,

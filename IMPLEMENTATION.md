@@ -574,6 +574,7 @@ Each is done when its tests pass and its reports survive test bench cleanup.
 - **V1 — TLS scenarios.** Depends: C2, C3, D2. Both roles with the upstream TLS settings; acceptance and rejection cases.
   Split (D-041): V1a, the runtime secures both roles with the upstream TLS settings, is done (D-041). V1b, the controller delivers the certificate material through the archive interface and the bench definition names it, is done (D-042). V1c, the acceptance and rejection scenarios on Docker, is done (D-043). V1 is done.
 - **V2 — Redundancy scenarios.** Depends: E5, U2.
+  Split (D-044): V2a, the runtime's client role as a redundancy group, is done (D-044). V2b, the bench model and the planner accept one client with several stations, and V2c, a managed station's stop and the switchover scenarios on Docker, remain.
 - **V3 — Controlled faults** ⛔ (interruption and latency through a dedicated proxy). Depends: D2. A maintainer approves the component and its privileges.
 - **V4 — Release documentation and platform matrix.** Depends: all previous tasks.
 - **V5 — Release** ⛔. A maintainer reviews the matrix, the limitations, and the licences.
