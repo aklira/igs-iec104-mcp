@@ -1051,3 +1051,27 @@ test can show it.
   keeps the group serving, whichever station the group started; a stop keeps the logs of the basic pair's station, and a
   restart is refused. The local-bench tests (`test_restart_scenario.py`, `test_runtime_scenario.py`, `test_milestone1.py`)
   pass with the release binary. The full integration suite passes, and the unit suite has 436 tests.
+
+## D-047: The release documentation starts before the platform matrix (V4, first part)
+
+- Date: 2026-10-12 (task V4, first part). The user decided to start the documentation now, although V4 depends on all
+  the previous tasks, and M4, X3 and V3 are human gates still open.
+- Decision: V4 is split. The documentation part is done (this decision). The platform matrix part waits for M4, X3, V3,
+  and for the Docker Desktop and WSL check named in X2. V4 stays unchecked in §16 until the matrix is complete.
+- Documentation written (English, in `docs/` and the README): setup (prerequisites, the images by identity, the project
+  directory, the server options, the MCP client configuration, the Podman socket, the gates); the definitions (the bench
+  and scenario YAML, the actions, the external target policy, the schemas); the Docker benches (containers, networks,
+  published stations, redundancy groups, managed stops, recovery); the MCP tools (contracts, error codes, run states,
+  verdict outcomes); runs and artifacts (layout, journal, snapshots, evidence, reports, retention, secrets);
+  troubleshooting; and the platform matrix (tested platforms and versions, feature support, the upstream's unsupported
+  requests, the observed limitations).
+- How the facts were checked: the snippets of the pages were validated with the server's validator; the links and their
+  anchors were checked; the commands of the setup page are those of the CI gates; the server's options, the error codes,
+  the states, and the tool signatures are read from the code.
+- Findings recorded in the documentation, not changed in the code:
+  - The planner's refusal of an external connection names task X1, which is done. The message is out of date, and the
+    matrix says so. Changing the message belongs to the task that makes external connections.
+  - There is no `bench_update` tool; a bench is stored under a new name. The scenario has `scenario_update`.
+  - The package has no console script: the server starts with `python -m igs_iec104_mcp` from the source tree.
+  - `send_command` to a managed instance is unsupported; to an external target it is confirmed and then unsupported.
+- Not in this part: the Docker Desktop and WSL check, the macOS check, and the matrix's final review.

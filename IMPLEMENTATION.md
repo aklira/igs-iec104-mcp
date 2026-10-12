@@ -577,6 +577,7 @@ Each is done when its tests pass and its reports survive test bench cleanup.
   Split (D-044): V2a, the runtime's client role as a redundancy group, is done (D-044). V2b, the bench model and the planner accept one client with several stations, is done (D-045). V2c, a managed station's stop and the switchover scenarios on Docker, is done (D-046). V2 is done.
 - **V3 — Controlled faults** ⛔ (interruption and latency through a dedicated proxy). Depends: D2. A maintainer approves the component and its privileges.
 - **V4 — Release documentation and platform matrix.** Depends: all previous tasks.
+  Started before its dependencies, as the user decided (D-047). The documentation part is done (D-047). The platform matrix remains: it is complete when M4, X3 and V3 are done and the Docker Desktop and WSL check has run.
 - **V5 — Release** ⛔. A maintainer reviews the matrix, the limitations, and the licences.
 
 ## 15. Test strategy and release definition
