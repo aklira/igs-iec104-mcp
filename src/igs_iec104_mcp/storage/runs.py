@@ -36,6 +36,7 @@ from igs_iec104_mcp.models.run import RUN_ID_PATTERN, TERMINAL, TRANSITIONS, Run
 
 DATABASE = "runs.sqlite3"
 RUNS_DIRECTORY = "runs"
+EVIDENCE_DIRECTORY = "evidence"
 JOURNAL = "events.jsonl"
 ARTIFACTS = "artifacts"
 SCHEMA_VERSION = 1

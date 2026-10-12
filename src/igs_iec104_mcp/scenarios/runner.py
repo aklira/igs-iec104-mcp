@@ -41,12 +41,15 @@ from igs_iec104_mcp.models.common import DefinitionError
 from igs_iec104_mcp.models.instance import ResourceLimits
 from igs_iec104_mcp.models.run import TERMINAL, RunStatus, Verdict
 from igs_iec104_mcp.models.scenario import Scenario, check_scenario
+from igs_iec104_mcp.reporting.reports import ReportOut, report_of
+from igs_iec104_mcp.runtime.pin import UPSTREAM_REVISION
 from igs_iec104_mcp.runtime.source import ControlSource
 from igs_iec104_mcp.scenarios.actions import actions_for
 from igs_iec104_mcp.scenarios.assertions import ASSERTION_HANDLERS
 from igs_iec104_mcp.scenarios.confirmation import Confirmer, Gate
 from igs_iec104_mcp.scenarios.engine import Result, execute
 from igs_iec104_mcp.storage.runs import (
+    EVIDENCE_DIRECTORY,
     RUNS_DIRECTORY,
     EventPage,
     InvalidTransition,
@@ -60,7 +63,7 @@ from igs_iec104_mcp.storage.runs import (
 
 # The label of the project that owns the containers of a run.
 PROJECT_LABEL = "igs-mcp"
-EVIDENCE = "evidence"
+EVIDENCE = EVIDENCE_DIRECTORY
 INTERRUPTED_DETAIL = (
     "the server stopped during the run: no command was resumed, and the bench is left "
     "for inspection (bench_recovered)"
@@ -115,6 +118,8 @@ class Engine(Protocol):
 
     async def recover(self, owner: Ownership, evidence: Path | None) -> list[str]: ...
 
+    def identities(self) -> dict[str, str]: ...
+
 
 class DockerEngine:
     """The Docker engine of the runs. A bench starts through the adapter, with the
@@ -153,6 +158,14 @@ class DockerEngine:
             evidence=evidence,
         )
 
+    def identities(self) -> dict[str, str]:
+        """The images of the benches, by their identities, and the upstream revision."""
+        return {
+            "runtime": self._image,
+            "relay": self._relay,
+            "upstream": UPSTREAM_REVISION,
+        }
+
     async def owners(self) -> list[Ownership]:
         adapter = await self._connect()
         try:
@@ -189,6 +202,9 @@ class NoEngine:
 
     async def start(self, bench: TestBench, run_id: str, evidence: Path) -> BenchHandle:
         raise EngineUnavailable(NO_ENGINE)
+
+    def identities(self) -> dict[str, str]:
+        return {}
 
     async def owners(self) -> list[Ownership]:
         raise EngineUnavailable(NO_ENGINE)
@@ -408,6 +424,11 @@ class Runner:
         with _failures():
             return self._runs.get(run_id)
 
+    def report(self, run_id: str, *, format: str) -> ReportOut:
+        """The report of an ended run in one format: json, junit, or summary."""
+        with _failures():
+            return report_of(self._runs, run_id, format)
+
     def list_runs(self, *, limit: int, cursor: str | None) -> RunPage:
         with _failures():
             return self._runs.list_runs(limit=limit, cursor=_cursor(cursor))
@@ -476,6 +497,7 @@ class Runner:
         confirmer: Confirmer | None,
     ) -> tuple[RunStatus, str]:
         evidence = self._runs.root / RUNS_DIRECTORY / run_id / EVIDENCE
+        self._runs.record(run_id, "engine", self._engine.identities())
         try:
             handle = await self._engine.start(bench, run_id, evidence)
         except Exception as error:
@@ -533,6 +555,7 @@ class Runner:
                     "step": verdict.step,
                     "outcome": str(verdict.outcome),
                     "detail": verdict.detail,
+                    "seconds": verdict.seconds,
                 },
             )
 

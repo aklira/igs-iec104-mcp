@@ -144,6 +144,9 @@ class FakeEngine:
         self.handles.append(handle)
         return handle
 
+    def identities(self) -> dict[str, str]:
+        return {"runtime": "sha256:fake", "relay": "sha256:fake", "upstream": "fake"}
+
     async def owners(self) -> list[Any]:
         return []
 
@@ -185,6 +188,7 @@ async def test_a_run_passes_and_journals_each_verdict_before_it_ends(
     assert record.status is RunStatus.PASSED
     assert record.ended_at_ms is not None
     assert kinds(runs, started.id) == [
+        "engine",
         "verdict",
         "verdict",
         "verdict",
@@ -209,7 +213,8 @@ async def test_a_bench_that_does_not_start_makes_the_run_an_error(
     assert record.status is RunStatus.ERROR
     events = runs.events(started.id).events
     assert events[-1]["reason"] == "the bench did not start"
-    assert "no image" in events[0]["detail"]
+    error = next(event for event in events if event["kind"] == "error")
+    assert "no image" in error["detail"]
 
 
 async def test_a_bench_that_does_not_stop_cleanly_makes_the_run_an_error(
@@ -303,4 +308,4 @@ async def test_the_journal_is_paged_with_a_cursor(tmp_path: Path) -> None:
     assert len(first.events) == 2
     assert first.next_cursor is not None
     second = runner.events(started.id, limit=10, cursor=str(first.next_cursor))
-    assert [event["seq"] for event in second.events] == [3, 4, 5]
+    assert [event["seq"] for event in second.events] == [3, 4, 5, 6]

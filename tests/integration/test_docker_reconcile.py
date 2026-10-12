@@ -155,7 +155,7 @@ async def test_a_run_of_a_killed_controller_is_interrupted_and_its_bench_removed
         assert runner.reconcile() == [run_id]
         record = runs.get(run_id)
         assert record.status is RunStatus.INTERRUPTED
-        assert kinds(runs, run_id) == ["verdict", "interrupted"]
+        assert kinds(runs, run_id) == ["engine", "verdict", "interrupted"]
 
         page = await runner.recovered()
         assert [(b.run, b.status) for b in page.benches] == [(run_id, "interrupted")]
@@ -164,7 +164,9 @@ async def test_a_run_of_a_killed_controller_is_interrupted_and_its_bench_removed
         assert removal.removed, "the bench's resources were removed"
         evidence = tmp_path / "runs" / run_id / "evidence"
         assert any(path.suffix == ".log" for path in evidence.iterdir())
-        assert kinds(runs, run_id) == ["verdict", "interrupted"], "the journal is kept"
+        assert kinds(runs, run_id) == ["engine", "verdict", "interrupted"], (
+            "the journal is kept"
+        )
         assert await adapter.owned(owner) == []
         page = await runner.recovered()
         assert page.benches == []

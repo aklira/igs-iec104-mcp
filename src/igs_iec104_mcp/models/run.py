@@ -112,6 +112,11 @@ class Verdict(Definition):
     step: str
     outcome: Outcome
     detail: str
+    seconds: float = Field(
+        default=0.0,
+        ge=0,
+        description="How long the step ran, from its start to its verdict.",
+    )
 
 
 class Artifact(Definition):

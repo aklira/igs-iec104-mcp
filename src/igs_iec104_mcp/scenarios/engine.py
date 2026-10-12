@@ -28,6 +28,7 @@ step.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -186,7 +187,7 @@ class _Ledger:
 
     observer: Callable[[Verdict], None] | None = None
     verdicts: list[Verdict] = field(default_factory=list)
-    open: dict[str, Step] = field(default_factory=dict)
+    open: dict[str, tuple[Step, float]] = field(default_factory=dict)
     completed: int = 0
     in_step: bool = False
     reason: str = ""
@@ -295,13 +296,13 @@ async def _execute(
     A step that does not end, because the global deadline cancels its task, stays open
     under its label, so that the deadline can record it.
     """
-    env.ledger.open[label] = step
+    env.ledger.open[label] = (step, time.monotonic())
     if isinstance(step, Parallel):
         outcome, detail = await _parallel(step, label, env, cancel, default_limit)
     else:
         outcome, detail = await _run_step(step, env, cancel, default_limit)
-    env.ledger.open.pop(label, None)
-    env.ledger.add(_verdict(label, step, outcome, detail))
+    _, began = env.ledger.open.pop(label)
+    env.ledger.add(_verdict(label, step, outcome, detail, time.monotonic() - began))
     return outcome
 
 
@@ -436,8 +437,10 @@ def _end_open(ledger: _Ledger, prefix: str | None, detail: str) -> None:
     for label in [
         label for label in ledger.open if prefix is None or label.startswith(prefix)
     ]:
-        step = ledger.open.pop(label)
-        ledger.add(_verdict(label, step, Outcome.TIMED_OUT, detail))
+        step, began = ledger.open.pop(label)
+        ledger.add(
+            _verdict(label, step, Outcome.TIMED_OUT, detail, time.monotonic() - began)
+        )
 
 
 async def _until_cancelled(
@@ -476,8 +479,15 @@ def _seconds(value: str | None) -> float | None:
     return None if value is None else duration_seconds(value)
 
 
-def _verdict(label: str, step: Step, outcome: Outcome, detail: str) -> Verdict:
-    return Verdict(step=f"{label}: {step.action}", outcome=outcome, detail=detail)
+def _verdict(
+    label: str, step: Step, outcome: Outcome, detail: str, seconds: float
+) -> Verdict:
+    return Verdict(
+        step=f"{label}: {step.action}",
+        outcome=outcome,
+        detail=detail,
+        seconds=seconds,
+    )
 
 
 def _status(

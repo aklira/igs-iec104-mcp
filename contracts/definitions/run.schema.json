@@ -145,6 +145,13 @@
         "outcome": {
           "$ref": "#/$defs/Outcome"
         },
+        "seconds": {
+          "default": 0.0,
+          "description": "How long the step ran, from its start to its verdict.",
+          "minimum": 0,
+          "title": "Seconds",
+          "type": "number"
+        },
         "step": {
           "title": "Step",
           "type": "string"

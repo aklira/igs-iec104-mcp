@@ -14,12 +14,14 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from igs_iec104_mcp.definitions import service, targets
 from igs_iec104_mcp.definitions.store import ProjectStore, StoreError
+from igs_iec104_mcp.reporting.reports import ReportOut
 from igs_iec104_mcp.scenarios.confirmation import ElicitingConfirmer
 from igs_iec104_mcp.scenarios.runner import (
     DockerEngine,
@@ -207,6 +209,19 @@ def create_server(
             events=page.events,
             next_cursor=None if page.next_cursor is None else str(page.next_cursor),
         )
+
+    @server.tool(
+        name="run_report",
+        description="The report of an ended run, in one format: json (the whole "
+        "record, with the input hashes, the engine's images and upstream revision, the "
+        "verdicts, and the manifest), junit (JUnit XML, one test case per step), or "
+        "summary (readable Markdown). It is made once and kept with the run, so it "
+        "outlives its bench.",
+    )
+    def run_report(
+        run_id: str, format: Literal["json", "junit", "summary"] = "json"
+    ) -> ReportOut:
+        return _call(lambda: runner.report(run_id, format=format))
 
     @server.tool(
         name="run_cancel",

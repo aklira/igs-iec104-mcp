@@ -797,3 +797,42 @@ test can show it.
   that does not allow the command refused at start; the opt-in's rules; the answer's rules) and
   `tests/integration/test_mcp_confirmation.py` (2 tests on Podman: a real MCP client answers through elicitation and the
   decision is journaled as confirmed; a client that cannot be asked gets a refusal, and the bench is removed).
+
+## D-039: Reports of an ended run: JSON, JUnit XML, and a summary (R2)
+
+- Date: 2026-10-12 (task R2).
+- Decision: one document is built from what a run kept (its record, its journal, its snapshot, its evidence, and its
+  artifacts). The JSON report is that document. The JUnit XML and the Markdown summary are rendered from it, so the
+  three formats agree. A report is made the first time it is asked for, once the run has ended, and stored as an
+  artifact of the run (`report.json`, `report.junit.xml`, `summary.md`). Later requests read the stored text. A run that
+  has not ended has no report (`invalid_state`), since its report would change as it runs.
+- Outcomes: each step's outcome is sorted into a category. A failed assertion is `assertion_failure`; an error of the
+  run or the bench is `infrastructure_error`; a deadline is `timeout`; a step the run does not carry out is
+  `unsupported`; a cancelled step is `cancelled`; an outcome the run could not decide is `indeterminate`. In JUnit, an
+  assertion failure is a `failure`, an infrastructure error, a timeout, or an indeterminate outcome is an `error`, and
+  an unsupported or cancelled step is `skipped`, so a reader can tell the three apart.
+- Per step: the label and action, the outcome and its category, the detail (the observed behaviour), the duration, the
+  journal sequence of its verdict (the event reference), and the definition the label names in the run's snapshot (the
+  expected behaviour). `_definition` follows the labels: `step 2.1.3` is the third step of the first branch of step 2.
+- Durations: the engine measures each step from its start to its verdict, a timed-out step included. The verdict carries
+  `seconds`, and the journal's `verdict` event carries it too (run schema regenerated).
+- Engine identities: a run records one `engine` event before its bench starts: the runtime and relay images by their
+  identities, and the upstream revision. The revision is `runtime/pin.py`, and a unit test checks it against the pin in
+  `runtime/igs-iec104-runtime/Cargo.toml`, so a report names the library the run used.
+- Inputs: the bench and scenario SHA-256 are the snapshot's hashes, the ones the run was checked against.
+- Cleanup: the bench's stop record (`stop.json` in the evidence, with the exit codes and whether the stop was graceful),
+  whether the bench stopped, and any stop failure. The cleanup steps are listed with the steps.
+- Manifest: the evidence files, and the artifacts of the run that are not reports, each with its SHA-256 and size. The
+  reports do not list themselves, so the JSON is the same whenever it is made.
+- Survival: a report needs no engine and no bench. It is kept with the run, in the run's artifacts, so it outlives the
+  removal of the bench. `run_report(run_id, format)` returns the artifact's name, digest, size, and text.
+- Not in R2: MCP resources for the reports (§9 asks for resources where supported; the tool is the interface now);
+  packet capture; the durations of the barrier of a parallel step (each branch step has its own); a retention policy
+  for reports (R3).
+- Tests: `tests/unit/test_reporting.py` (10 tests: a passed run with its expectations, inputs, and engine; each format
+  stored once and read back; failures sorted into their categories; a valid JUnit with one case per step; an
+  unsupported step skipped and not failed; the summary as Markdown with the failures; a run not ended refused; an unknown
+  format refused; a label naming its definition; the upstream revision pinned). `tests/integration/test_mcp_report.py`
+  (one test on Podman: a real MCP client runs the example, asks for the three formats once the bench is removed, finds
+  the images and the upstream revision in the JSON, and reads the stored report back).
+- Journal layout: the `engine` event comes first, so the tests that list a journal's kinds now expect it.
