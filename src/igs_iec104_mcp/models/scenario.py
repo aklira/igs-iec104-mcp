@@ -38,6 +38,8 @@ ACTIONS: tuple[str, ...] = (
     "send_command",
     "stop_instance",
     "switchover",
+    "inject_fault",
+    "clear_fault",
     "start_instance",
     "parallel",
 )
@@ -151,6 +153,35 @@ class UpdatePoint(Definition):
     timeout: Timing = DEFAULT_TIMEOUT
 
 
+class InjectFault(Definition):
+    """Injects a fault on a connection that goes through a fault proxy: `interrupt`
+    closes its connections and refuses new ones; `latency` delays each chunk it forwards
+    by `latency_ms`. An interrupt passes when the client records the loss of its
+    connection (V3)."""
+
+    action: Literal["inject_fault"]
+    client: Name
+    server: Name
+    mode: Literal["interrupt", "latency"]
+    latency_ms: int | None = Field(
+        default=None,
+        ge=1,
+        le=60_000,
+        description="The delay of the latency mode, in milliseconds.",
+    )
+    timeout: Timing = DEFAULT_TIMEOUT
+
+
+class ClearFault(Definition):
+    """Clears the fault of a connection through a fault proxy: its traffic flows again,
+    and a client that was interrupted reconnects (V3)."""
+
+    action: Literal["clear_fault"]
+    client: Name
+    server: Name
+    timeout: Timing = DEFAULT_TIMEOUT
+
+
 class SendCommand(Definition):
     """Sends a single or double command. A select, then an execution, is the usual "
     "pair (§7)."""
@@ -258,6 +289,8 @@ Step = Annotated[
     | SendCommand
     | StopInstance
     | Switchover
+    | InjectFault
+    | ClearFault
     | StartInstance
     | Parallel,
     Field(discriminator="action"),
@@ -331,6 +364,9 @@ class _Checker:
         self.instances = {instance.name: instance for instance in bench.instances}
         self.targets = {target.name: target for target in bench.external_targets}
         self.connections = {(c.client, c.server) for c in bench.connections}
+        self.faulted_connections = {
+            (c.client, c.server) for c in bench.connections if c.fault_proxy
+        }
 
     def steps(self, steps: list[Step], where: str, issues: list[Issue]) -> None:
         for index, step in enumerate(steps):
@@ -363,6 +399,8 @@ class _Checker:
             self.managed(step.instance, step.action, where, issues)
         elif isinstance(step, Switchover):
             self.group(step.client, where, issues)
+        elif isinstance(step, (InjectFault, ClearFault)):
+            self.faulted(step, where, issues)
 
     def refusal(self, step: ExpectRefusal, where: str, issues: list[Issue]) -> None:
         self.client(step.client, where, issues)
@@ -409,6 +447,23 @@ class _Checker:
                     f"{name!r} is a server, and only a client has an image to check",
                 )
             )
+
+    def faulted(
+        self, step: InjectFault | ClearFault, where: str, issues: list[Issue]
+    ) -> None:
+        if (step.client, step.server) not in self.faulted_connections:
+            issues.append(
+                Issue(
+                    where,
+                    f"{step.client!r} -> {step.server!r} is not a connection through "
+                    "a fault proxy: declare it with fault_proxy: true",
+                )
+            )
+        if isinstance(step, InjectFault):
+            if step.mode == "latency" and step.latency_ms is None:
+                issues.append(Issue(where, "the latency mode needs latency_ms"))
+            if step.mode == "interrupt" and step.latency_ms is not None:
+                issues.append(Issue(where, "latency_ms belongs to the latency mode"))
 
     def group(self, name: str, where: str, issues: list[Issue]) -> None:
         """A switchover is of a client that connects to a redundancy group: two or more

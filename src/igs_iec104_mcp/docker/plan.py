@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from igs_iec104_mcp.docker.specs import (
     CONTROL_NETWORK,
@@ -62,6 +62,9 @@ MIB = 1024 * 1024
 MAX_STATIONS_PER_CLIENT = 8
 # A relay only copies bytes: a small limit is enough for it.
 RELAY_LIMITS = Limits(cpus=0.25, memory_bytes=64 * MIB, pids=32)
+# The port a fault proxy listens on inside its container. The clients of a faulted
+# connection are given the proxy's address and this port (V3).
+PROXY_PORT = 2404
 
 
 class PlanError(Exception):
@@ -145,12 +148,25 @@ class PlannedRuntime:
 
 
 @dataclass(frozen=True)
+class PlannedProxy:
+    """A fault proxy of one connection: it sits on the connection's network, listens on
+    `PROXY_PORT` inside its container, and forwards to the server (V3)."""
+
+    name: str
+    client: str
+    server: str
+    network: str
+
+
+@dataclass(frozen=True)
 class BenchPlan:
     name: str
     networks: tuple[PlannedNetwork, ...]
     servers: tuple[PlannedRuntime, ...]
     clients: tuple[PlannedRuntime, ...]
     server_of: dict[str, tuple[str, ...]]
+    proxies: tuple[PlannedProxy, ...] = ()
+    proxy_of: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def runtime_path(name: str) -> str:
@@ -232,6 +248,26 @@ def relay_arguments(target: str, port: int = CONTROL_PORT) -> tuple[str, ...]:
     return ("--listen", f"0.0.0.0:{port}", "--target", target)
 
 
+# The fault proxy runs its own program from the relay image (docker/relay.Dockerfile).
+PROXY_ENTRYPOINT: tuple[str, ...] = ("python", "-I", "/usr/local/bin/faultproxy.py")
+
+
+def proxy_arguments(target: str, token_file: str) -> tuple[str, ...]:
+    """The arguments of a fault proxy: it listens on `PROXY_PORT` for its client,
+    forwards to the server at `target` (`address:port`), and its control API listens on
+    the control port, with the token read from `token_file`."""
+    return (
+        "--listen",
+        f"0.0.0.0:{PROXY_PORT}",
+        "--target",
+        target,
+        "--control",
+        f"0.0.0.0:{CONTROL_PORT}",
+        "--control-token-file",
+        token_file,
+    )
+
+
 def client_arguments(
     runtime: PlannedRuntime, connect: Sequence[str]
 ) -> tuple[str, ...]:
@@ -265,6 +301,8 @@ def plan_bench(bench: TestBench) -> BenchPlan:
     instances = {instance.name: instance for instance in bench.instances}
     external = {target.name for target in bench.external_targets}
     server_of: dict[str, list[str]] = {}
+    proxies: list[PlannedProxy] = []
+    proxy_of: dict[tuple[str, str], str] = {}
     for connection in bench.connections:
         if connection.client in external or connection.server in external:
             issues.append(
@@ -281,6 +319,17 @@ def plan_bench(bench: TestBench) -> BenchPlan:
                 f"{server.network!r}"
             )
         server_of.setdefault(client.name, []).append(server.name)
+        if connection.fault_proxy:
+            name = f"proxy-{len(proxies) + 1}"
+            proxies.append(
+                PlannedProxy(
+                    name=name,
+                    client=client.name,
+                    server=server.name,
+                    network=client.network,
+                )
+            )
+            proxy_of[(client.name, server.name)] = name
     for client_name, stations in server_of.items():
         if len(stations) > MAX_STATIONS_PER_CLIENT:
             issues.append(
@@ -321,6 +370,8 @@ def plan_bench(bench: TestBench) -> BenchPlan:
         servers=tuple(servers),
         clients=tuple(clients),
         server_of={name: tuple(stations) for name, stations in server_of.items()},
+        proxies=tuple(proxies),
+        proxy_of=proxy_of,
     )
 
 

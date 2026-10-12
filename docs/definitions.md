@@ -53,6 +53,7 @@ The full example is [`examples/benches/basic-pair.yaml`](../examples/benches/bas
 | `instances[].tls` | the TLS material of an instance, as secret references (see [TLS](#tls)) |
 | `external_targets[]` | a station or client the bench does not manage (see [External targets](#external-targets)) |
 | `connections[].client`, `server` | a client connects to a station; a client may connect to several stations, which form its group |
+| `connections[].fault_proxy` | the connection goes through a fault proxy, which a scenario can interrupt or delay (see [faults](#faults)) |
 | `cleanup.remove`, `cleanup.keep_evidence` | when the resources are removed, and whether the evidence is kept (below) |
 
 ### Points
@@ -184,6 +185,8 @@ The full example is [`examples/scenarios/interrogation-and-spontaneous-update.ya
 | `expect_refusal` | expects a station to refuse a client's connection: a TLS alarm, or a refused connect |
 | `stop_instance` | stops a managed instance for good; its logs are kept, and each client records the loss |
 | `switchover` | stops the station a redundancy group started, and waits for the switch to another station |
+| `inject_fault` | on a connection through a proxy: `interrupt` closes its connections and refuses the reconnections; `latency` delays each chunk by `latency_ms` |
+| `clear_fault` | on a connection through a proxy: the traffic flows again, and an interrupted client reconnects |
 | `start_instance` | refused on a managed bench: a restart needs a fixed station port |
 | `parallel` | runs branches of steps at once; the step ends when every branch has ended |
 
@@ -202,6 +205,26 @@ the value (for example `3` for a spontaneous update).
 
 A run takes a snapshot of its inputs when it starts: the bench and scenario texts (by SHA-256), and the digests of
 the secrets it reads. Editing a definition does not change a run in progress.
+
+## Faults
+
+A connection that declares `fault_proxy: true` goes through a proxy on the bench network: the client connects to the
+proxy, which forwards every byte to the station. Both ends must be managed instances on one network.
+
+```yaml
+connections:
+  - client: client-1
+    server: server-1
+    fault_proxy: true
+```
+
+- `inject_fault` with `mode: interrupt` passes when the client's connection is down. The proxy refuses the
+  reconnections until `clear_fault`, so the client stays down until then.
+- `inject_fault` with `mode: latency` and a `latency_ms` (1 to 60000) passes when the proxy reports that mode. The delay
+  applies to each chunk the proxy forwards, in both directions.
+- A fault step on a connection without the flag is refused at validation.
+
+The proxy changes no byte and drops none. Its own control API needs the bench's token, as a runtime's does.
 
 ## Validation and schemas
 

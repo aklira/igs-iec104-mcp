@@ -308,3 +308,67 @@ def test_a_passed_run_with_a_failed_step_is_refused() -> None:
         Run.model_validate(
             _run(copy.deepcopy(BENCH), copy.deepcopy(SCENARIO), verdicts=verdicts)
         )
+
+
+def faulted_bench() -> Bench:
+    """The basic pair with its connection through a fault proxy."""
+    data = copy.deepcopy(BENCH)
+    data["connections"][0]["fault_proxy"] = True
+    return Bench.model_validate(data)
+
+
+def test_a_fault_needs_a_connection_through_a_proxy() -> None:
+    data = copy.deepcopy(SCENARIO)
+    data["steps"] = [
+        {
+            "action": "inject_fault",
+            "client": "client-1",
+            "server": "server-1",
+            "mode": "interrupt",
+        }
+    ]
+    found = problems(data)
+    assert any("is not a connection through a fault proxy" in p for p in found)
+
+
+def test_a_latency_fault_needs_its_latency_and_an_interrupt_takes_none() -> None:
+    data = copy.deepcopy(SCENARIO)
+    data["steps"] = [
+        {
+            "action": "inject_fault",
+            "client": "client-1",
+            "server": "server-1",
+            "mode": "latency",
+        },
+        {
+            "action": "inject_fault",
+            "client": "client-1",
+            "server": "server-1",
+            "mode": "interrupt",
+            "latency_ms": 5,
+        },
+    ]
+    found = problems(data, faulted_bench())
+    assert any("the latency mode needs latency_ms" in p for p in found)
+    assert any("latency_ms belongs to the latency mode" in p for p in found)
+
+
+def test_a_fault_and_its_clearing_are_valid_on_a_connection_through_a_proxy() -> None:
+    data = copy.deepcopy(SCENARIO)
+    data["steps"] = [
+        {
+            "action": "inject_fault",
+            "client": "client-1",
+            "server": "server-1",
+            "mode": "interrupt",
+        },
+        {
+            "action": "inject_fault",
+            "client": "client-1",
+            "server": "server-1",
+            "mode": "latency",
+            "latency_ms": 50,
+        },
+        {"action": "clear_fault", "client": "client-1", "server": "server-1"},
+    ]
+    check_scenario(Scenario.model_validate(data), faulted_bench())

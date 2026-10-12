@@ -110,6 +110,9 @@ class FakeBench:
     def stations_of(self, client: str) -> list[str]:
         return self.stations.get(client, [])
 
+    def fault(self, client: str, server: str) -> Any:
+        raise NotImplementedError("the fake bench has no fault proxy")
+
     async def stop(self, instance: str) -> None:
         self.stopped.append(instance)
         for client in self.clients_of(instance) if self.disconnects else []:
@@ -390,3 +393,110 @@ async def test_an_update_waits_until_the_connected_client_holds_the_value() -> N
     await observing
     assert result.status is RunStatus.PASSED
     assert result.verdicts[0].detail.endswith(f"; {CLIENT} holds 18.0")
+
+
+class FakeFault:
+    """A fault proxy whose mode the test sets. An interrupt takes the client's
+    connection down, as the proxy closes it, unless `cuts` is false. `stuck` makes the
+    proxy report no change."""
+
+    def __init__(
+        self, client: FakeControl, *, stuck: bool = False, cuts: bool = True
+    ) -> None:
+        self.client = client
+        self.stuck = stuck
+        self.cuts = cuts
+        self.mode = "none"
+        self.latency_ms = 0
+        self.calls: list[tuple[str, int]] = []
+
+    async def state(self) -> dict[str, Any]:
+        return {"mode": self.mode, "latency_ms": self.latency_ms}
+
+    async def set(self, mode: str, latency_ms: int = 0) -> dict[str, Any]:
+        self.calls.append((mode, latency_ms))
+        if not self.stuck:
+            self.mode = mode
+            self.latency_ms = latency_ms if mode == "latency" else 0
+        if mode == "interrupt" and self.cuts:
+            self.client.state["connection"] = "down"
+        return await self.state()
+
+
+class FaultBench(FakeBench):
+    """A bench whose one connection goes through a fake fault proxy."""
+
+    def __init__(self, client: FakeControl, fault: FakeFault) -> None:
+        super().__init__({CLIENT: client, STATION: FakeControl()}, {STATION: [CLIENT]})
+        self._fault = fault
+
+    def fault(self, client: str, server: str) -> Any:
+        return self._fault
+
+
+def inject(mode: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "action": "inject_fault",
+        "client": CLIENT,
+        "server": STATION,
+        "mode": mode,
+        **fields,
+    }
+
+
+async def test_an_interrupt_passes_when_the_client_loses_its_connection() -> None:
+    client = FakeControl(connection="up")
+    fault = FakeFault(client)
+    result = await run(FaultBench(client, fault), inject("interrupt"))
+    assert result.status is RunStatus.PASSED
+    assert fault.calls == [("interrupt", 0)]
+    assert result.verdicts[0].detail == (
+        f"{CLIENT} lost {STATION} through the proxy (interrupt)"
+    )
+
+
+async def test_an_interrupt_that_leaves_the_client_connected_times_out() -> None:
+    client = FakeControl(connection="up")
+    fault = FakeFault(client, cuts=False)
+    result = await run(FaultBench(client, fault), inject("interrupt", timeout="300ms"))
+    assert result.status is RunStatus.FAILED
+    assert result.verdicts[0].outcome is Outcome.TIMED_OUT
+
+
+async def test_a_latency_passes_when_the_proxy_reports_it() -> None:
+    client = FakeControl(connection="up")
+    fault = FakeFault(client)
+    result = await run(FaultBench(client, fault), inject("latency", latency_ms=50))
+    assert result.status is RunStatus.PASSED
+    assert fault.calls == [("latency", 50)]
+    assert result.verdicts[0].detail == f"{CLIENT} -> {STATION}: 50 ms of latency"
+
+
+async def test_a_latency_the_proxy_does_not_report_fails_the_step() -> None:
+    client = FakeControl(connection="up")
+    fault = FakeFault(client, stuck=True)
+    result = await run(FaultBench(client, fault), inject("latency", latency_ms=50))
+    assert result.status is RunStatus.FAILED
+    assert "the proxy reports" in result.verdicts[0].detail
+
+
+async def test_clearing_a_fault_passes_when_the_proxy_is_back_to_none() -> None:
+    client = FakeControl(connection="up")
+    fault = FakeFault(client)
+    fault.mode, fault.latency_ms = "latency", 50
+    result = await run(
+        FaultBench(client, fault),
+        {"action": "clear_fault", "client": CLIENT, "server": STATION},
+    )
+    assert result.status is RunStatus.PASSED
+    assert fault.mode == "none"
+    assert result.verdicts[0].detail == f"{CLIENT} -> {STATION}: no fault"
+
+
+async def test_a_connection_without_a_proxy_is_refused_by_the_bench() -> None:
+    client = FakeControl(connection="up")
+    result = await run(
+        FakeBench({CLIENT: client, STATION: FakeControl()}, {STATION: [CLIENT]}),
+        inject("interrupt"),
+    )
+    assert result.status is RunStatus.ERROR

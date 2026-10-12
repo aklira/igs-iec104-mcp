@@ -188,14 +188,19 @@ class DockerAdapter:
         except (APIError, DockerException, OSError) as error:
             raise DockerError(f"the Docker engine failed: {error}") from error
 
-    async def put_files(self, resource: Resource, files: dict[str, bytes]) -> None:
+    async def put_files(
+        self,
+        resource: Resource,
+        files: dict[str, bytes],
+        owner: int = RUNTIME_UID,
+    ) -> None:
         """Copies files into the run directory of a created container, before it
-        starts. Each file is readable by the runtime's user alone. A name is a plain
-        file name."""
+        starts. Each file is readable by the owner's user alone (the runtime's, unless
+        another is given). A name is a plain file name."""
         for name in files:
             if not name or "/" in name or name in {".", ".."}:
                 raise DockerError(f"{name!r} is not a plain file name")
-        await self._call(partial(self._put_files, resource, files))
+        await self._call(partial(self._put_files, resource, files, owner))
 
     async def connect_network(
         self, resource: Resource, network: str, ownership: Ownership
@@ -231,14 +236,16 @@ class DockerAdapter:
     def _container(self, resource: Resource) -> Any:
         return self._client.containers.get(resource.identity)
 
-    def _put_files(self, resource: Resource, files: dict[str, bytes]) -> None:
+    def _put_files(
+        self, resource: Resource, files: dict[str, bytes], owner: int
+    ) -> None:
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w") as archive:
             for name, data in files.items():
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 info.mode = 0o400
-                info.uid = info.gid = RUNTIME_UID
+                info.uid = info.gid = owner
                 archive.addfile(info, io.BytesIO(data))
         self._container(resource).put_archive(RUN_DIRECTORY, buffer.getvalue())
 
@@ -311,6 +318,7 @@ class DockerAdapter:
             labels=ownership.labels(instance=spec.instance),
             network=network,
             command=list(spec.arguments) or None,
+            entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
             privileged=False,
             cap_drop=["ALL"],
             security_opt=list(SECURITY_OPTIONS),

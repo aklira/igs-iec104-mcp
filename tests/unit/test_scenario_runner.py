@@ -121,6 +121,9 @@ class FakeHandle:
     def client(self, instance: str) -> FakeClient:
         return self.client_api
 
+    def fault(self, client: str, server: str) -> Any:
+        raise NotImplementedError("the fake bench has no fault proxy")
+
     async def stop_instance(self, instance: str) -> object:
         """The client of the fake bench loses its connection with the station."""
         self.stopped_instances.append(instance)

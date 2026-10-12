@@ -44,16 +44,26 @@ class Control(Protocol):
     async def image_points(self) -> dict[str, Any]: ...
 
 
+class Fault(Protocol):
+    """The control API of a fault proxy: its state, and its mode."""
+
+    async def state(self) -> dict[str, Any]: ...
+
+    async def set(self, mode: str, latency_ms: int = 0) -> dict[str, Any]: ...
+
+
 class Bench(Protocol):
     """The instances of a bench: their control APIs, the clients of each station, the
-    stations of each client in the order of its group, and how each instance is stopped
-    and started again."""
+    stations of each client in the order of its group, how each instance is stopped and
+    started again, and the fault proxy of each connection that has one."""
 
     def control(self, instance: str) -> Control: ...
 
     def clients_of(self, instance: str) -> list[str]: ...
 
     def stations_of(self, client: str) -> list[str]: ...
+
+    def fault(self, client: str, server: str) -> Fault: ...
 
     async def stop(self, instance: str) -> None: ...
 
@@ -209,6 +219,29 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         await bench.start(step.instance)
         return f"{step.instance} started"
 
+    async def inject_fault(step: Any, context: Context) -> str:
+        """An interrupt is complete when the client's connection is down: the proxy
+        refuses the reconnections until the fault is cleared. A latency is complete when
+        the proxy reports it."""
+        link = bench.fault(step.client, step.server)
+        if step.mode == "interrupt":
+            await link.set("interrupt")
+            await _wait_down(bench.control(step.client), step.client)
+            return f"{step.client} lost {step.server} through the proxy (interrupt)"
+        await link.set("latency", step.latency_ms)
+        state = await link.state()
+        if state.get("mode") != "latency" or state.get("latency_ms") != step.latency_ms:
+            raise StepFailed(f"the proxy reports {state}, not the latency asked for")
+        return f"{step.client} -> {step.server}: {step.latency_ms} ms of latency"
+
+    async def clear_fault(step: Any, context: Context) -> str:
+        link = bench.fault(step.client, step.server)
+        await link.set("none")
+        state = await link.state()
+        if state.get("mode") != "none":
+            raise StepFailed(f"the proxy still reports {state}")
+        return f"{step.client} -> {step.server}: no fault"
+
     return {
         "wait_connection": wait_connection,
         "expect_refusal": expect_refusal,
@@ -218,6 +251,8 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         "update_point": update_point,
         "stop_instance": stop_instance,
         "switchover": switchover,
+        "inject_fault": inject_fault,
+        "clear_fault": clear_fault,
         "start_instance": start_instance,
     }
 

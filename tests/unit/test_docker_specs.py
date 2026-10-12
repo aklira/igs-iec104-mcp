@@ -91,6 +91,9 @@ def test_a_container_has_no_field_for_a_mount_a_privilege_or_a_capability() -> N
         "network",
         "limits",
         "arguments",
+        # The entrypoint replaces the image's, so a fault proxy runs its own program
+        # from the relay image. It is no mount, privilege, or capability.
+        "entrypoint",
         "publish_control",
         "publish",
     }

@@ -96,6 +96,9 @@ class FakeBench:
     def stations_of(self, client: str) -> list[str]:
         return ["server-1"]
 
+    def fault(self, client: str, server: str) -> Any:
+        raise NotImplementedError("the fake bench has no fault proxy")
+
     async def stop(self, instance: str) -> None:
         return None
 

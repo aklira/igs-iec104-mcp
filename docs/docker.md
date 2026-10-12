@@ -64,6 +64,17 @@ instances:
 An external client connects to `advertise:host_port`. The station's relay listens on the port inside the bench, and
 the engine publishes that relay on `bind:host_port`.
 
+## Fault proxies
+
+A connection that declares `fault_proxy: true` is carried by a fault proxy: a program of the relay image, with its own
+container on the connection's network, and its own control relay like a runtime's. The proxy listens on port 2404
+inside its container, and the client is given the proxy's address and that port. The proxy is started after the
+station is ready, since it forwards to the station's bound address. The token is copied in through the archive
+interface, and the proxy runs as the relay's user, with no privilege and no mount.
+
+On stop, the proxy's logs are kept as `proxy-<n>`, and its exit code is not counted in the graceful-stop check, as a
+relay's is not.
+
 ## Redundancy groups
 
 A client connected to several stations forms a redundancy group, up to eight stations. The group starts the data

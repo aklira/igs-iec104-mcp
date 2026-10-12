@@ -126,6 +126,10 @@ class LocalBench:
         """The stations of a client: one, the station of this bench."""
         return [self._station] if client == self._client else []
 
+    def fault(self, client: str, server: str) -> Any:
+        """A local bench has no fault proxy: its connections are direct."""
+        raise RuntimeError(f"{client} -> {server} has no fault proxy on a local bench")
+
     async def aclose(self) -> None:
         """Stops every running instance: the client first, then the station."""
         for instance in (self._client, self._station):

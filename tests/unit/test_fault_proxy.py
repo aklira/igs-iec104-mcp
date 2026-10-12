@@ -211,3 +211,30 @@ def test_the_token_file_is_read_without_its_line_end(tmp_path: Path) -> None:
     path.write_text("\n", encoding="utf-8")
     with pytest.raises(ValueError, match="empty"):
         faultproxy.read_token(str(path))
+
+
+async def test_the_bench_client_of_the_proxy_sets_and_reads_its_mode() -> None:
+    from igs_iec104_mcp.runtime.api import ControlApiError
+    from igs_iec104_mcp.runtime.faults import FaultClient
+
+    async with proxy_and_echo() as (forward_port, control_port, token):
+        client = FaultClient(f"127.0.0.1:{control_port}", token)
+        try:
+            set_latency = await client.set("latency", 30)
+            assert set_latency["mode"] == "latency"
+            assert (await client.state())["latency_ms"] == 30
+            await client.set("none")
+            assert (await client.state())["mode"] == "none"
+            with pytest.raises(ControlApiError) as refused:
+                await client.set("drop")
+            assert refused.value.status == 400
+        finally:
+            await client.aclose()
+        assert await roundtrip(forward_port, b"after") == b"after"
+        stranger = FaultClient(f"127.0.0.1:{control_port}", secrets.token_urlsafe(32))
+        try:
+            with pytest.raises(ControlApiError) as unauthorized:
+                await stranger.state()
+            assert unauthorized.value.status == 401
+        finally:
+            await stranger.aclose()

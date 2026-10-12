@@ -50,6 +50,7 @@ from igs_iec104_mcp.models.scenario import (
     check_scenario,
 )
 from igs_iec104_mcp.reporting.reports import ReportOut, report_of
+from igs_iec104_mcp.runtime.faults import FaultClient
 from igs_iec104_mcp.runtime.pin import UPSTREAM_REVISION
 from igs_iec104_mcp.runtime.source import ControlSource
 from igs_iec104_mcp.scenarios.actions import actions_for
@@ -114,10 +115,13 @@ class Client(Protocol):
 
 
 class BenchHandle(Protocol):
-    """A started bench: the control client of an instance, the stop of one instance, and
-    the removal of the bench."""
+    """A started bench: the control client of an instance, the control client of the
+    fault proxy of a connection, the stop of one instance, and the removal of the
+    bench."""
 
     def client(self, instance: str) -> Client: ...
+
+    def fault(self, client: str, server: str) -> FaultClient: ...
 
     async def stop_instance(self, instance: str) -> object: ...
 
@@ -272,7 +276,25 @@ class _ManagedBench:
         self._bench = bench
         self._before_stop = before_stop
         self._clients: dict[str, Client] = {}
+        self._faults: dict[tuple[str, str], FaultClient] = {}
         self.stopped: set[str] = set()
+
+    def fault(self, client: str, server: str) -> FaultClient:
+        """The control client of the fault proxy of a connection. A connection that does
+        not go through a proxy has none, and a step that names one is refused."""
+        if (client, server) not in self._faults:
+            declared = [
+                c
+                for c in self._bench.connections
+                if (c.client, c.server) == (client, server) and c.fault_proxy
+            ]
+            if not declared:
+                raise RunError(
+                    f"{client} -> {server} does not go through a fault proxy: declare "
+                    "fault_proxy: true on the connection"
+                )
+            self._faults[(client, server)] = self._handle.fault(client, server)
+        return self._faults[(client, server)]
 
     def control(self, instance: str) -> Client:
         if instance not in self._clients:
@@ -302,6 +324,8 @@ class _ManagedBench:
     async def close(self) -> None:
         for client in self._clients.values():
             await client.aclose()
+        for fault in self._faults.values():
+            await fault.aclose()
 
 
 @dataclass

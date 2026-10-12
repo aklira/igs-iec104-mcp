@@ -215,3 +215,52 @@ def test_the_name_of_the_control_network_is_reserved() -> None:
     data["networks"].append({"name": "control"})
     (issue,) = refused(data)
     assert "reserves" in issue
+
+
+def proxied(data: dict[str, Any]) -> dict[str, Any]:
+    """The basic pair with its connection through a fault proxy."""
+    data = copy.deepcopy(data)
+    data["connections"][0]["fault_proxy"] = True
+    return data
+
+
+def test_a_connection_through_a_fault_proxy_gets_one_proxy_on_its_network() -> None:
+    result = plan_bench(Bench.model_validate(proxied(BENCH)))
+    assert [(p.name, p.client, p.server, p.network) for p in result.proxies] == [
+        ("proxy-1", "client-1", "server-1", "lan")
+    ]
+    assert result.proxy_of == {("client-1", "server-1"): "proxy-1"}
+    assert result.server_of == {"client-1": ("server-1",)}, "the server table is kept"
+
+
+def test_a_connection_without_the_flag_has_no_proxy() -> None:
+    result = plan_bench(Bench.model_validate(BENCH))
+    assert result.proxies == ()
+    assert result.proxy_of == {}
+
+
+def test_each_faulted_connection_gets_its_own_proxy() -> None:
+    data = proxied(BENCH)
+    station = instance(data, "server-1")
+    data["instances"].append({**station, "name": "server-2", "common_address": 2})
+    data["connections"].append(
+        {"client": "client-1", "server": "server-2", "fault_proxy": True}
+    )
+    result = plan_bench(Bench.model_validate(data))
+    assert [p.name for p in result.proxies] == ["proxy-1", "proxy-2"]
+    assert result.proxy_of[("client-1", "server-2")] == "proxy-2"
+
+
+def test_the_proxy_forwards_to_the_station_and_serves_its_control_port() -> None:
+    arguments = plan.proxy_arguments("172.20.0.5:40001", runtime_path("control-token"))
+    assert arguments == (
+        "--listen",
+        "0.0.0.0:2404",
+        "--target",
+        "172.20.0.5:40001",
+        "--control",
+        "0.0.0.0:8080",
+        "--control-token-file",
+        "/run/igs/control-token",
+    )
+    assert plan.PROXY_ENTRYPOINT == ("python", "-I", "/usr/local/bin/faultproxy.py")

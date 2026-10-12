@@ -42,6 +42,12 @@
           "title": "Client",
           "type": "string"
         },
+        "fault_proxy": {
+          "default": false,
+          "description": "The connection goes through a fault proxy, which a scenario can interrupt or delay. Both ends must be managed instances on one network.",
+          "title": "Fault Proxy",
+          "type": "boolean"
+        },
         "server": {
           "description": "The instance or external target that accepts the connection.",
           "title": "Server",

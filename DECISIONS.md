@@ -1125,3 +1125,34 @@ test can show it.
   cleared; an interrupt closes the open connection and refuses a new one, and clearing it admits connections again; the
   control API refuses a request without the token; the modes refuse bad values. A close with a byte still unread reaches
   the client as a reset; the test counts that as a close. The process was also run on real ports and checked with curl.
+
+## D-050: A connection through a fault proxy, and the fault steps (V3b)
+
+- Date: 2026-10-12 (task V3, second part: V3b).
+- Decision: a connection declares `fault_proxy: true`. The planner gives it one proxy, `proxy-<n>`, on the connection's
+  network (both ends on one network, as before). The proxy runs the relay image's program `faultproxy.py` through an
+  entrypoint of its own (`ContainerSpec.entrypoint`), with a control relay on the control network like a runtime's. It
+  listens on `PROXY_PORT` (2404) inside its container, and the client is given the proxy's address and that port. The
+  proxy starts after its station is ready, since it forwards to the station's bound address; the clients start after the
+  proxies.
+- Token and user: the token is copied in with `put_files(owner=RELAY_UID)`, so the proxy, which runs as the relay's user
+  (10002), can read it; the relay image creates `/run/igs` for that user. The default owner stays the runtime's.
+- Steps: `inject_fault` (`interrupt` or `latency` with `latency_ms`) and `clear_fault`, on a connection with the flag. An
+  interrupt passes when the client's connection is down; a latency passes when the proxy reports it; a clear passes when
+  the proxy reports mode `none`. A step on a connection without the flag is refused at validation, and at run time by the
+  bench (a `RunError`).
+- Stop: the proxies stop after the clients and before the stations, and their logs are kept as `proxy-<n>` and
+  `relay-proxy-<n>`. A proxy's exit code is not part of the graceful-stop check.
+- Schema: `bench.schema.json` gains `fault_proxy`; `scenario.schema.json` gains `inject_fault` and `clear_fault`. The
+  `ContainerSpec` guard test now lists `entrypoint`, which is an image override, not a mount, privilege, or capability.
+- Not in V3b: the Docker scenarios of an interruption, a latency, and the reconnection after a clear (V3c). The
+  smoke test of V3b only shows that a client reaches its station through the proxy, with the proxy at mode `none`.
+- Tests: `tests/unit/test_docker_plan.py` (a faulted connection gets one proxy on its network; each faulted connection
+  its own; the proxy's arguments and entrypoint), `tests/unit/test_models_scenario_and_run.py` (a fault needs a proxied
+  connection; the latency needs its value; an interrupt takes none; a valid fault and clear pass),
+  `tests/unit/test_scenario_actions.py` (an interrupt passes when the client is down and times out otherwise; a latency
+  passes when reported and fails when not; a clear passes at mode `none`; a fault on a bench without a proxy is an error),
+  `tests/unit/test_fault_proxy.py` (the bench's client sets and reads the mode, and is refused without the token),
+  `tests/integration/test_docker_faults.py` (on Podman, with the relay image `localhost/igs-iec104-relay:v3b`: the client
+  connects through the proxy, starts its transfer, interrogates the station, the proxy reports mode `none` with the
+  connection it carries, the proxy's logs are kept, and the bench is removed).

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictBool, model_validator
 
 from igs_iec104_mcp.models.common import Definition, Name, SchemaVersion
 from igs_iec104_mcp.models.instance import Instance
@@ -37,6 +37,11 @@ class Connection(Definition):
     )
     server: Name = Field(
         description="The instance or external target that accepts the connection.",
+    )
+    fault_proxy: StrictBool = Field(
+        default=False,
+        description="The connection goes through a fault proxy, which a scenario can "
+        "interrupt or delay. Both ends must be managed instances on one network.",
     )
 
 

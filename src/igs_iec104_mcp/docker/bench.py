@@ -29,19 +29,25 @@ from igs_iec104_mcp.docker.adapter import Creation, DockerAdapter, DockerError, 
 from igs_iec104_mcp.docker.labels import Ownership
 from igs_iec104_mcp.docker.plan import (
     POINTS_FILE,
+    PROXY_ENTRYPOINT,
+    PROXY_PORT,
     RELAY_LIMITS,
     TOKEN_FILE,
     BenchPlan,
+    PlannedProxy,
     PlannedRuntime,
     client_arguments,
     plan_bench,
+    proxy_arguments,
     relay_arguments,
+    runtime_path,
     server_arguments,
     tls_file_names,
 )
 from igs_iec104_mcp.docker.specs import (
     CONTROL_NETWORK,
     CONTROL_PORT,
+    RELAY_UID,
     ContainerSpec,
     NetworkSpec,
     PortPublication,
@@ -50,6 +56,7 @@ from igs_iec104_mcp.docker.specs import (
 )
 from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.runtime.api import ControlApiError, ControlClient
+from igs_iec104_mcp.runtime.faults import FaultClient
 from igs_iec104_mcp.runtime.process import read_control_token, write_control_token
 
 # Called before each step of the start, with the step's name. It may raise to inject a
@@ -81,6 +88,19 @@ class Member:
 
 
 @dataclass(frozen=True)
+class ProxyMember:
+    """A fault proxy of a running bench: its container, its control relay, the control
+    address the host reaches through the relay, and its address on the connection's
+    network, which the client of the connection is given (V3b)."""
+
+    plan: PlannedProxy
+    resource: Resource
+    relay: Resource
+    control: str
+    address: str
+
+
+@dataclass(frozen=True)
 class StopReport:
     """How each runtime ended, and how many resources were removed. A runtime that
     exited with status 0 after SIGTERM stopped gracefully."""
@@ -104,15 +124,37 @@ class RunningBench:
     evidence: Path
     token: str = field(repr=False)
     _adapter: DockerAdapter = field(repr=False)
+    proxies: dict[tuple[str, str], ProxyMember] = field(default_factory=dict)
 
     def client(self, instance: str) -> ControlClient:
         """A control client for one runtime, through its relay. The caller closes it."""
         return ControlClient(self.members[instance].control, self.token)
 
+    def fault(self, client: str, server: str) -> FaultClient:
+        """A control client for the fault proxy of a connection. The caller closes
+        it."""
+        return FaultClient(self.proxies[(client, server)].control, self.token)
+
     def advertised(self, instance: str) -> str | None:
         """The endpoint a published station advertises to external clients, as the plan
         declares it: `advertise:host_port`. None for a station that is not published."""
         return self.members[instance].advertised
+
+    async def _stop_member(
+        self, member: Member, grace: int, exit_codes: dict[str, int | None]
+    ) -> None:
+        name = member.runtime.name
+        await self._adapter.stop_container(member.resource, grace)
+        exit_codes[name] = await _exit_code(self._adapter, member.resource)
+        await _preserve(self._adapter, member.resource, name, self.evidence)
+        await _preserve(self._adapter, member.relay, f"relay-{name}", self.evidence)
+        if member.publication is not None:
+            await _preserve(
+                self._adapter,
+                member.publication,
+                f"publication-{name}",
+                self.evidence,
+            )
 
     async def stop_instance(self, instance: str, grace: int = 10) -> int | None:
         """Stops one runtime's container, with SIGTERM and a deadline of `grace`
@@ -127,28 +169,30 @@ class RunningBench:
         return await _exit_code(self._adapter, member.resource)
 
     async def stop(self, grace: int = 10) -> StopReport:
-        """Stops the clients, then the stations, with SIGTERM and a deadline of `grace`
-        seconds. Each runtime's logs and record, and its relay's, are kept before the
-        owner's resources are removed, even when a stop fails."""
-        order = [m for m in self.members.values() if m.runtime.role == "client"]
-        order += [m for m in self.members.values() if m.runtime.role == "server"]
+        """Stops the clients, then the fault proxies, then the stations, with SIGTERM
+        and a deadline of `grace` seconds. Each runtime's logs and record, and its
+        relay's, are kept before the owner's resources are removed, even when a stop
+        fails. The exit codes are those of the runtimes: a relay or a proxy is not
+        counted."""
+        clients = [m for m in self.members.values() if m.runtime.role == "client"]
+        servers = [m for m in self.members.values() if m.runtime.role == "server"]
         exit_codes: dict[str, int | None] = {}
         try:
-            for member in order:
-                name = member.runtime.name
-                await self._adapter.stop_container(member.resource, grace)
-                exit_codes[name] = await _exit_code(self._adapter, member.resource)
-                await _preserve(self._adapter, member.resource, name, self.evidence)
+            for member in clients:
+                await self._stop_member(member, grace, exit_codes)
+            for proxy in self.proxies.values():
+                await self._adapter.stop_container(proxy.resource, grace)
                 await _preserve(
-                    self._adapter, member.relay, f"relay-{name}", self.evidence
+                    self._adapter, proxy.resource, proxy.plan.name, self.evidence
                 )
-                if member.publication is not None:
-                    await _preserve(
-                        self._adapter,
-                        member.publication,
-                        f"publication-{name}",
-                        self.evidence,
-                    )
+                await _preserve(
+                    self._adapter,
+                    proxy.relay,
+                    f"relay-{proxy.plan.name}",
+                    self.evidence,
+                )
+            for member in servers:
+                await self._stop_member(member, grace, exit_codes)
         finally:
             removed = await self._adapter.remove_owned(self.ownership)
         report = StopReport(exit_codes=exit_codes, removed=len(removed))
@@ -221,7 +265,7 @@ async def start_bench(
         token = read_control_token(token_path)
         async with adapter.creating(ownership) as creation:
             try:
-                members = await _bring_up(
+                members, proxies = await _bring_up(
                     adapter,
                     plan,
                     ownership,
@@ -243,6 +287,7 @@ async def start_bench(
         evidence=evidence,
         token=token,
         _adapter=adapter,
+        proxies=proxies,
     )
 
 
@@ -283,7 +328,7 @@ async def _bring_up(
     ready_timeout: float,
     material: Mapping[str, Mapping[str, bytes]],
     await_clients: bool = True,
-) -> dict[str, Member]:
+) -> tuple[dict[str, Member], dict[tuple[str, str], ProxyMember]]:
     for network in plan.networks:
         await steps(f"network:{network.name}")
         await creation.network(NetworkSpec(network.name, internal=not network.external))
@@ -304,9 +349,28 @@ async def _bring_up(
             connect=None,
             files=material.get(server.name, {}),
         )
+    proxies: dict[tuple[str, str], ProxyMember] = {}
+    for proxy in plan.proxies:
+        target = await _station_address(
+            adapter, members[proxy.server], ownership, proxy.network
+        )
+        proxies[(proxy.client, proxy.server)] = await _launch_proxy(
+            adapter,
+            creation,
+            ownership,
+            relay_id=relay_id,
+            proxy=proxy,
+            target=target,
+            token=token,
+            steps=steps,
+        )
     for client in plan.clients:
         addresses = []
         for name in plan.server_of[client.name]:
+            proxy_member = proxies.get((client.name, name))
+            if proxy_member is not None:
+                addresses.append(f"{proxy_member.address}:{PROXY_PORT}")
+                continue
             station = members[name]
             addresses.append(
                 await _station_address(adapter, station, ownership, client.network)
@@ -325,7 +389,7 @@ async def _bring_up(
             files=material.get(client.name, {}),
             await_connection=await_clients,
         )
-    return members
+    return members, proxies
 
 
 async def _launch(
@@ -374,21 +438,9 @@ async def _launch(
     await adapter.start_container(resource)
     ip = await _address_on(adapter, resource, ownership, runtime.network)
     await steps(f"relay:{name}")
-    relay = await creation.container(
-        ContainerSpec(
-            instance=f"relay-{name}",
-            image=relay_id,
-            network=CONTROL_NETWORK,
-            limits=RELAY_LIMITS,
-            arguments=relay_arguments(f"{ip}:{CONTROL_PORT}"),
-            publish_control=True,
-        )
+    relay, control = await _control_relay(
+        adapter, creation, ownership, relay_id, runtime.network, ip, name
     )
-    await adapter.connect_network(
-        relay, resource_name(ownership, runtime.network), ownership
-    )
-    await adapter.start_container(relay)
-    control = await _control_address(adapter, relay)
     publication: Resource | None = None
     advertised: str | None = None
     if runtime.publication is not None:
@@ -463,6 +515,79 @@ async def _publish(
     )
     await adapter.start_container(resource)
     return resource
+
+
+async def _launch_proxy(
+    adapter: DockerAdapter,
+    creation: Creation,
+    ownership: Ownership,
+    *,
+    relay_id: str,
+    proxy: PlannedProxy,
+    target: str,
+    token: str,
+    steps: _Steps,
+) -> ProxyMember:
+    """A fault proxy and its control relay (V3b). The proxy runs the relay image's
+    program, as the relay's user, which is the one the token is copied for. It is
+    reached through the relay like a runtime, and its address on the connection's
+    network is the one the client is given."""
+    name = proxy.name
+    await steps(f"create:{name}")
+    resource = await creation.container(
+        ContainerSpec(
+            instance=name,
+            image=relay_id,
+            network=proxy.network,
+            limits=RELAY_LIMITS,
+            entrypoint=PROXY_ENTRYPOINT,
+            arguments=proxy_arguments(target, runtime_path(TOKEN_FILE)),
+        )
+    )
+    await adapter.put_files(
+        resource, {TOKEN_FILE: token.encode("utf-8")}, owner=RELAY_UID
+    )
+    await steps(f"start:{name}")
+    await adapter.start_container(resource)
+    address = await _address_on(adapter, resource, ownership, proxy.network)
+    await steps(f"relay:{name}")
+    relay, control = await _control_relay(
+        adapter, creation, ownership, relay_id, proxy.network, address, name
+    )
+    return ProxyMember(
+        plan=proxy,
+        resource=resource,
+        relay=relay,
+        control=control,
+        address=address,
+    )
+
+
+async def _control_relay(
+    adapter: DockerAdapter,
+    creation: Creation,
+    ownership: Ownership,
+    relay_id: str,
+    network: str,
+    address: str,
+    name: str,
+) -> tuple[Resource, str]:
+    """The relay of a container's control port: created on the control network, where
+    the engine publishes it, and joined to the container's network. Returns the relay
+    and the host address of its published port."""
+    relay = await creation.container(
+        ContainerSpec(
+            instance=f"relay-{name}",
+            image=relay_id,
+            network=CONTROL_NETWORK,
+            limits=RELAY_LIMITS,
+            arguments=relay_arguments(f"{address}:{CONTROL_PORT}"),
+            publish_control=True,
+        )
+    )
+    await adapter.connect_network(relay, resource_name(ownership, network), ownership)
+    await adapter.start_container(relay)
+    return relay, await _control_address(adapter, relay)
 
 
 async def _control_address(adapter: DockerAdapter, relay: Resource) -> str:

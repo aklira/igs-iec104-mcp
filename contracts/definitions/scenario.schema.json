@@ -93,6 +93,37 @@
       "title": "AssertPoint",
       "type": "object"
     },
+    "ClearFault": {
+      "additionalProperties": false,
+      "description": "Clears the fault of a connection through a fault proxy: its traffic flows again,\nand a client that was interrupted reconnects (V3).",
+      "properties": {
+        "action": {
+          "const": "clear_fault",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "server": {
+          "title": "Server",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client",
+        "server"
+      ],
+      "title": "ClearFault",
+      "type": "object"
+    },
     "ExpectPoint": {
       "additionalProperties": false,
       "description": "Waits for a new observation of the client after the step's cursor (\u00a78).",
@@ -249,6 +280,61 @@
       "title": "GeneralInterrogation",
       "type": "object"
     },
+    "InjectFault": {
+      "additionalProperties": false,
+      "description": "Injects a fault on a connection that goes through a fault proxy: `interrupt`\ncloses its connections and refuses new ones; `latency` delays each chunk it forwards\nby `latency_ms`. An interrupt passes when the client records the loss of its\nconnection (V3).",
+      "properties": {
+        "action": {
+          "const": "inject_fault",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "latency_ms": {
+          "anyOf": [
+            {
+              "maximum": 60000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The delay of the latency mode, in milliseconds.",
+          "title": "Latency Ms"
+        },
+        "mode": {
+          "enum": [
+            "interrupt",
+            "latency"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "server": {
+          "title": "Server",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client",
+        "server",
+        "mode"
+      ],
+      "title": "InjectFault",
+      "type": "object"
+    },
     "Parallel": {
       "additionalProperties": false,
       "description": "Runs branches of steps at the same time. Each branch is a list of steps, in \"\n\"order. The step ends when every branch has ended: that is its barrier.",
@@ -264,9 +350,11 @@
               "discriminator": {
                 "mapping": {
                   "assert_point": "#/$defs/AssertPoint",
+                  "clear_fault": "#/$defs/ClearFault",
                   "expect_point": "#/$defs/ExpectPoint",
                   "expect_refusal": "#/$defs/ExpectRefusal",
                   "general_interrogation": "#/$defs/GeneralInterrogation",
+                  "inject_fault": "#/$defs/InjectFault",
                   "parallel": "#/$defs/Parallel",
                   "send_command": "#/$defs/SendCommand",
                   "start_instance": "#/$defs/StartInstance",
@@ -312,6 +400,12 @@
                 },
                 {
                   "$ref": "#/$defs/Switchover"
+                },
+                {
+                  "$ref": "#/$defs/InjectFault"
+                },
+                {
+                  "$ref": "#/$defs/ClearFault"
                 },
                 {
                   "$ref": "#/$defs/StartInstance"
@@ -695,9 +789,11 @@
         "discriminator": {
           "mapping": {
             "assert_point": "#/$defs/AssertPoint",
+            "clear_fault": "#/$defs/ClearFault",
             "expect_point": "#/$defs/ExpectPoint",
             "expect_refusal": "#/$defs/ExpectRefusal",
             "general_interrogation": "#/$defs/GeneralInterrogation",
+            "inject_fault": "#/$defs/InjectFault",
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
             "start_instance": "#/$defs/StartInstance",
@@ -743,6 +839,12 @@
           },
           {
             "$ref": "#/$defs/Switchover"
+          },
+          {
+            "$ref": "#/$defs/InjectFault"
+          },
+          {
+            "$ref": "#/$defs/ClearFault"
           },
           {
             "$ref": "#/$defs/StartInstance"
@@ -787,9 +889,11 @@
         "discriminator": {
           "mapping": {
             "assert_point": "#/$defs/AssertPoint",
+            "clear_fault": "#/$defs/ClearFault",
             "expect_point": "#/$defs/ExpectPoint",
             "expect_refusal": "#/$defs/ExpectRefusal",
             "general_interrogation": "#/$defs/GeneralInterrogation",
+            "inject_fault": "#/$defs/InjectFault",
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
             "start_instance": "#/$defs/StartInstance",
@@ -835,6 +939,12 @@
           },
           {
             "$ref": "#/$defs/Switchover"
+          },
+          {
+            "$ref": "#/$defs/InjectFault"
+          },
+          {
+            "$ref": "#/$defs/ClearFault"
           },
           {
             "$ref": "#/$defs/StartInstance"

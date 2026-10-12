@@ -38,6 +38,9 @@ CONTROL_NETWORK = "control"
 # starts, so no mount is used: a mount made at start would hide the copied files.
 RUN_DIRECTORY = "/run/igs"
 RUNTIME_UID = 10001
+# The user of a relay and of a fault proxy, which run from the relay image
+# (relay.Dockerfile).
+RELAY_UID = 10002
 # The runtime is hardened by default: no privilege escalation, with the read-only root
 # filesystem and the dropped capabilities set in the container spec.
 SECURITY_OPTIONS = ("no-new-privileges:true",)
@@ -121,6 +124,7 @@ class ContainerSpec:
     network: str
     limits: Limits = field(default_factory=Limits)
     arguments: tuple[str, ...] = ()
+    entrypoint: tuple[str, ...] | None = None
     publish_control: bool = False
     publish: PortPublication | None = None
 
