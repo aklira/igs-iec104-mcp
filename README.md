@@ -5,7 +5,7 @@ set of protocol runtimes built on the `igs-iec104` Rust library: stations, clien
 their own networks. A scenario drives a bench through its control APIs and records every verdict, every event,
 and the evidence of each run.
 
-The server is a Python 3.12 program that speaks MCP over stdio. The protocol runtime is a Rust program, packaged
+The server is a Python 3.12 program that speaks MCP over stdio, or over Streamable HTTP on the loopback. The protocol runtime is a Rust program, packaged
 in a container image. The protocol work is done by the upstream library, pinned by revision (`runtime/Cargo.toml`).
 
 ## Documentation
@@ -25,11 +25,14 @@ in `docs/ai-log/`.
 
 ## Status
 
-The milestones through V2 are done: definitions, the Docker bench lifecycle, the scenario engine, the MCP tools,
-the external target policy, the reports and retention, TLS on both roles, and redundancy groups. The MCP server also
-speaks Streamable HTTP on the loopback, with a bearer token (M4). The release
-documentation is in progress; the remaining work is listed in the platform matrix. The server is not a certified
-implementation, and its reports do not certify the protocol behaviour of any station or client.
+Milestones 1 to 7 are done, and milestone 8 (the validation release) is in progress. Implemented: bench definitions,
+the Docker and Podman lifecycle, the scenario engine, the MCP tools over stdio and over Streamable HTTP on the loopback
+with a bearer token, the external target policy, published server endpoints, reports and retention, TLS on both roles,
+redundancy groups, and controlled faults (latency and interrupt). Interoperability is checked against an independent
+implementation (OpenMUC j60870) in a test-only image. The release documentation and the platform matrix are in
+progress (V4): the Docker Desktop check is still pending. The release itself (V5) is a maintainer decision. The
+remaining work is listed in the platform matrix. The server is not a certified implementation, and its reports do not
+certify the protocol behaviour of any station or client.
 
 ## License
 
