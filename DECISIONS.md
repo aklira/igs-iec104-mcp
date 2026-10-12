@@ -1173,3 +1173,39 @@ test can show it.
 - Tests: `tests/integration/test_docker_fault_scenarios.py` (two tests on Podman, relay image `v3b`): the interrupt
   scenario passes eight steps, and its interrupt and clear verdicts name the fault; the latency scenario passes six
   steps, with the interrogation at least 0.2 s long.
+
+## D-052: An independent implementation as a black-box peer, first direction (X3, first part: X3a)
+
+- Date: 2026-10-12 (task X3, first part). The maintainer approved the candidate on 2026-10-12: the OpenMUC j60870 library
+  (GNU GPL v3), used as a black box in its own container, built locally and never redistributed by this project.
+- Split: X3 is two parts for now. X3a (this decision): the peer image and a first direction, our client of igs-iec104
+  against the peer's station. X3b: the other direction (the peer as a client of our managed station) and the scenarios
+  through the planner. X3b needs a decision first, below.
+- Source discipline: the peer's source code was not opened, downloaded, or read. Its public API was read from the javadoc
+  of the release (the javadoc jar of the release on Maven Central), which documents the public classes and methods only.
+  The binary was fetched from Maven Central at the pinned version 1.8.0, and its SHA-256 (fd6feff8...4e7) was checked
+  against the checksum Maven Central publishes, both in the image build and by hand.
+- Peer: `docker/independent/` has a Java program of this project, `Station.java`, which uses the library's public API to
+  listen on a port, confirm each interrogation, and answer with one point (address 100, short float 12.5, cause 20). It
+  keeps no protocol logic of its own. The image is two stages: the build (a JDK image) fetches and checks the library and
+  compiles the program; the run stage (a JRE image) runs the program as the user 10003, with no privilege. Both base
+  images are pinned by digest. The library's jar is made readable to that user (its mode from the download is 0600).
+- Test: `tests/integration/test_interop_j60870.py` starts the peer container with its port published on the loopback at
+  an engine-chosen port, starts our runtime as a client to that port, and checks: the connection comes up, the transfer
+  starts, the interrogation is accepted, the point arrives with type 13, cause 20, common address 1 and value 12.5; the
+  peer logs the start of the data transfer. The container is removed after the test. The test needs
+  `IGS_INDEPENDENT_IMAGE` and the runtime binary; CI builds the peer image in the integration job.
+- Result: the first direction works on the wire. The library's client of our runtime and the peer's station agree on the
+  framing, the transfer start, the interrogation, and the point's type and value.
+- Not in X3a: the other direction (the peer as a client of our managed station, which needs a station published through
+  X2 and a peer client program); the scenarios through the planner (the planner refuses a connection to an external
+  target, X1); commands, reads, and spontaneous updates against the peer; a feature matrix of the peer. These are X3b.
+- Decision needed before X3b: how the planner reaches an external station or client. Options: (a) a bench declares an
+  external target with its endpoint, the planner connects a managed client to it, and the peer container is started by
+  the test on the bench's external network; (b) the peer is started as a managed instance of a separate bench, and the
+  two benches are linked through a published endpoint (X2). Option (b) keeps the planner unchanged and uses the existing
+  publication path; option (a) is the one the plan describes. I recommend (b) for X3b.
+- Licence note: the peer image contains the library under GPL v3. It is built locally and not pushed or redistributed by
+  this project. The build reads the library from Maven Central; the program of this project that calls it is ours.
+- Tests: `tests/integration/test_interop_j60870.py` (one test, on Podman with the peer image `localhost/igs-iec104-j60870:1.8.0`
+  and the runtime binary).
