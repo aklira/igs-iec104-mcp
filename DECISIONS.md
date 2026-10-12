@@ -1100,3 +1100,28 @@ test can show it.
   `401`, a foreign `Host` gets `421`, a foreign `Origin` gets `403`, the right token gets the initialize result and the 19
   tools); the command line's refusals. A real run on a port, checked with curl: `401` without the token, `200` with it,
   `421` for a foreign host, and the token absent from the server's log.
+
+## D-049: The fault proxy is a standalone unprivileged program (V3, first part: V3a)
+
+- Date: 2026-10-12 (task V3, first part). The maintainer approved the component: a user-space TCP proxy, without
+  privileges, on the bench network, not network-stack injection (`tc`/`netem` with `NET_ADMIN`).
+- Split: V3 is three parts. V3a (this decision): the proxy program, its control API, and its tests. V3b: the bench model
+  declares which connection goes through a proxy, the planner and the bench start the proxy, and the scenario steps
+  inject and clear a fault. V3c: the Docker scenarios of an interruption and of a latency, with the reconnect.
+- Decision: `docker/faultproxy.py` forwards each connection it accepts to one target, byte for byte, and its control API
+  adds one of three modes: `none`, `latency` (a delay before each chunk it forwards, in each direction, 1 to 60000 ms),
+  and `interrupt` (it closes every connection it carries and refuses the next ones until the mode is cleared). It changes
+  no byte and drops none. Only the standard library is used.
+- Control API: HTTP/1.1 on its own port. `GET /v1/fault` reads the mode, the latency, the open connections, the
+  interrupted connections, and the refused ones. `PUT /v1/fault` sets the mode. A request without the bench's token as a
+  bearer header gets `401`; a malformed request gets `400`, a missing path `404`, another method `405`, and a slow
+  request `408`. The token is read from a file, as the runtime reads its control token, and never from the arguments.
+- Privileges: none beyond a normal container. The proxy needs no `NET_ADMIN`, no Docker socket, and no mount; it sits on
+  the bench network, and only the links a bench declares go through it (V3b).
+- Not in V3a: the proxy is not yet in an image, not started by a bench, and not reachable from a scenario. Its image
+  comes with V3b, which will add it to the relay image's build context. No dependency is added.
+- Tests: `tests/unit/test_fault_proxy.py` (7 tests) loads the file and runs it on the loopback with ports the system
+  chooses, reading them after each listener is bound. Bytes pass unchanged; a latency delays them until the mode is
+  cleared; an interrupt closes the open connection and refuses a new one, and clearing it admits connections again; the
+  control API refuses a request without the token; the modes refuse bad values. A close with a byte still unread reaches
+  the client as a reset; the test counts that as a close. The process was also run on real ports and checked with curl.
