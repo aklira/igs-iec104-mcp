@@ -1156,3 +1156,20 @@ test can show it.
   `tests/integration/test_docker_faults.py` (on Podman, with the relay image `localhost/igs-iec104-relay:v3b`: the client
   connects through the proxy, starts its transfer, interrogates the station, the proxy reports mode `none` with the
   connection it carries, the proxy's logs are kept, and the bench is removed).
+
+## D-051: The fault scenarios on Docker (V3c)
+
+- Date: 2026-10-12 (task V3, third part: V3c). V3 is done with this part.
+- Decision: two scenarios run through the run engine on a bench whose connection goes through a fault proxy
+  (`proxied-pair`, D-050):
+  - `interrupt-and-reconnect`: the client connects and starts its transfer; `inject_fault` interrupts the proxy, and the
+    client records its connection down; `clear_fault` lifts the fault; the client reconnects through the proxy, starts its
+    transfer again, interrogates, and reads the station's value (12.5).
+  - `latency-interrogation`: `inject_fault` sets 200 ms of latency per forwarded chunk before the transfer starts; the
+    transfer and the interrogation still pass; the interrogation takes at least 0.2 s; `clear_fault` ends the run.
+- Evidence: each run keeps `proxy-1.log` in its evidence, and removes its bench.
+- Not in V3c: a stop of the proxy's own container, or faults in both directions with separate delays. Those are not in
+  the plan's scope for V3, and they are not needed to show the steps work on Docker.
+- Tests: `tests/integration/test_docker_fault_scenarios.py` (two tests on Podman, relay image `v3b`): the interrupt
+  scenario passes eight steps, and its interrupt and clear verdicts name the fault; the latency scenario passes six
+  steps, with the interrogation at least 0.2 s long.

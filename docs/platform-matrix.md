@@ -47,7 +47,7 @@ Desktop, with the same test suite, before a release.
 | Stop of a managed station | supported, for good | `stop_instance`; its logs are kept; a restart is refused |
 | TLS on both roles | supported and tested | upstream settings; acceptance and rejection scenarios; a refused client records a security alarm |
 | Redundancy group of a client (2 to 8 stations) | supported and tested | the group starts one station and switches to another |
-| Connection through a fault proxy | supported on Docker | `fault_proxy: true`; the `inject_fault` and `clear_fault` steps are tested with fakes, and on Docker in V3c |
+| Connection through a fault proxy | supported on Docker and tested | `fault_proxy: true`; `inject_fault` (interrupt, latency) and `clear_fault`, with a reconnection after the clear |
 | Switchover on Docker | supported and tested | `switchover`, and a stop of a group's station |
 | Manual switchover through the control API | not exposed | the library provides it; the control API does not |
 | Group transfer start (`POST /v1/transfer/start`) | accepted, no effect | the group starts the transfer of the station it starts |
