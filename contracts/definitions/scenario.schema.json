@@ -272,6 +272,7 @@
                   "start_instance": "#/$defs/StartInstance",
                   "start_transfer": "#/$defs/StartTransfer",
                   "stop_instance": "#/$defs/StopInstance",
+                  "switchover": "#/$defs/Switchover",
                   "update_point": "#/$defs/UpdatePoint",
                   "wait_connection": "#/$defs/WaitConnection",
                   "wait_transfer_started": "#/$defs/WaitTransferStarted"
@@ -308,6 +309,9 @@
                 },
                 {
                   "$ref": "#/$defs/StopInstance"
+                },
+                {
+                  "$ref": "#/$defs/Switchover"
                 },
                 {
                   "$ref": "#/$defs/StartInstance"
@@ -540,7 +544,7 @@
     },
     "StopInstance": {
       "additionalProperties": false,
-      "description": "Stops a managed instance. A client that was connected to it must record the\ndisconnection before the step passes (\u00a78).",
+      "description": "Stops a managed instance, for good: its logs are kept, and it is not started\nagain. A client that was connected to it must record the loss of the link before\nthe step passes: a client of one station is disconnected, and a client of a group\nrecords the loss of that station's endpoint (\u00a78, \u00a710).",
       "properties": {
         "action": {
           "const": "stop_instance",
@@ -562,6 +566,32 @@
         "instance"
       ],
       "title": "StopInstance",
+      "type": "object"
+    },
+    "Switchover": {
+      "additionalProperties": false,
+      "description": "Stops the station that a client's redundancy group has started. The step passes\nwhen the group has switched to another connected station and started its transfer\nthere (\u00a710.5).",
+      "properties": {
+        "action": {
+          "const": "switchover",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client"
+      ],
+      "title": "Switchover",
       "type": "object"
     },
     "UpdatePoint": {
@@ -673,6 +703,7 @@
             "start_instance": "#/$defs/StartInstance",
             "start_transfer": "#/$defs/StartTransfer",
             "stop_instance": "#/$defs/StopInstance",
+            "switchover": "#/$defs/Switchover",
             "update_point": "#/$defs/UpdatePoint",
             "wait_connection": "#/$defs/WaitConnection",
             "wait_transfer_started": "#/$defs/WaitTransferStarted"
@@ -709,6 +740,9 @@
           },
           {
             "$ref": "#/$defs/StopInstance"
+          },
+          {
+            "$ref": "#/$defs/Switchover"
           },
           {
             "$ref": "#/$defs/StartInstance"
@@ -761,6 +795,7 @@
             "start_instance": "#/$defs/StartInstance",
             "start_transfer": "#/$defs/StartTransfer",
             "stop_instance": "#/$defs/StopInstance",
+            "switchover": "#/$defs/Switchover",
             "update_point": "#/$defs/UpdatePoint",
             "wait_connection": "#/$defs/WaitConnection",
             "wait_transfer_started": "#/$defs/WaitTransferStarted"
@@ -797,6 +832,9 @@
           },
           {
             "$ref": "#/$defs/StopInstance"
+          },
+          {
+            "$ref": "#/$defs/Switchover"
           },
           {
             "$ref": "#/$defs/StartInstance"

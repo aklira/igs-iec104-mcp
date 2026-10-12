@@ -1013,3 +1013,41 @@ test can show it.
   now a tuple per client), `tests/unit/test_instance_tls.py` (the new argument type). `tests/integration/test_docker_group.py`
   passes on Podman: a bench with a client of two stations starts, the client sees two stations, its group starts one of
   them without a request, and the bench is removed. The single-station Docker tests pass with the same image.
+
+## D-046: A managed station is stopped for good, and a scenario switches a group over (V2c)
+
+- Date: 2026-10-12 (task V2, third part: V2c). V2 is done with this part.
+- Decision: a scenario stops a managed instance with `stop_instance`. The container gets SIGTERM with a grace of 10
+  seconds, its logs and record are kept in the run's evidence as `<instance>-stopped`, and the container stays until the
+  bench is removed. A stopped instance is not started again: `start_instance` is still refused, because a restart needs
+  a fixed port (D2). Stopping an instance twice in one run is an error.
+- The stop waits for the loss. Each client that was connected to the instance records it before the step passes:
+  - a client of one station: its connection is down;
+  - a client of a group: a `disconnected` event with the station's endpoint index, after the cursor taken before the
+    stop, so an earlier loss does not count;
+  - a group client whose started station was the one stopped: the step ends at the switchover (a `switched` event from
+    that index, the transfer started on the new station), or when the group has no station connected left.
+- The endpoint index of a station is its position among the client's connections in the bench, the order the planner
+  gives the `--connect` arguments (D-045).
+- Drop counts: a stopped instance's drop count is read before its stop, and a drop is recorded as a gap then. It is not
+  read after the stop, so a stopped station is not reported as unreadable.
+- A new step, `switchover` (client): it stops the station the group has started (`started_endpoint` of its ready body)
+  and passes when the group has switched to another station and started the transfer there. The model refuses it for a
+  client of one station, and a server. It fails when no station is started, and times out when no switchover happens.
+- Contract: `scenario.schema.json` gains the `switchover` step. The runtime and its contract are unchanged, so the
+  runtime image of V2a is used.
+- Limits: a group station must be connected before a scenario stops it: the step does not read the history, so a stop of
+  a station the group never connected to times out. A group's switchover is started by the library only: a manual
+  switchover through the control API is not exposed (`switch_to`). A group's transfer start is still a no-op.
+- Docker test bench: the second station of the group answers to the client's common address (1). A station of another
+  address refuses the client's requests, which the group bench of V2b did not check (that bench gave it address 2).
+- Tests: `tests/unit/test_scenario_actions.py` (a stop waits for the connected client; a group's standby stop waits for
+  its endpoint; an earlier loss does not satisfy it; a stop of the started station ends at the switchover or when the
+  group is down; a switchover passes, fails without a started station, and times out), `tests/unit/test_scenario_runner.py`
+  (the handle's stop), `tests/unit/test_retention.py` (a stopped instance is read once before its stop; a second stop is
+  an error), `tests/unit/test_models_scenario_and_run.py` (a switchover needs a group; a server is refused).
+  `tests/integration/test_docker_switchover.py` passes on Podman: the switchover moves the transfer and the client reads
+  the value on the new station, with the stopped station's logs kept and the bench removed; a stop of a group station
+  keeps the group serving, whichever station the group started; a stop keeps the logs of the basic pair's station, and a
+  restart is refused. The local-bench tests (`test_restart_scenario.py`, `test_runtime_scenario.py`, `test_milestone1.py`)
+  pass with the release binary. The full integration suite passes, and the unit suite has 436 tests.

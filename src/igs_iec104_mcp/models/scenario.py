@@ -37,6 +37,7 @@ ACTIONS: tuple[str, ...] = (
     "update_point",
     "send_command",
     "stop_instance",
+    "switchover",
     "start_instance",
     "parallel",
 )
@@ -188,11 +189,23 @@ class StartTransfer(Definition):
 
 
 class StopInstance(Definition):
-    """Stops a managed instance. A client that was connected to it must record the
-    disconnection before the step passes (§8)."""
+    """Stops a managed instance, for good: its logs are kept, and it is not started
+    again. A client that was connected to it must record the loss of the link before
+    the step passes: a client of one station is disconnected, and a client of a group
+    records the loss of that station's endpoint (§8, §10)."""
 
     action: Literal["stop_instance"]
     instance: Name
+    timeout: Timing = DEFAULT_TIMEOUT
+
+
+class Switchover(Definition):
+    """Stops the station that a client's redundancy group has started. The step passes
+    when the group has switched to another connected station and started its transfer
+    there (§10.5)."""
+
+    action: Literal["switchover"]
+    client: Name
     timeout: Timing = DEFAULT_TIMEOUT
 
 
@@ -244,6 +257,7 @@ Step = Annotated[
     | UpdatePoint
     | SendCommand
     | StopInstance
+    | Switchover
     | StartInstance
     | Parallel,
     Field(discriminator="action"),
@@ -347,6 +361,8 @@ class _Checker:
             self.command(step, where, issues)
         elif isinstance(step, (StopInstance, StartInstance)):
             self.managed(step.instance, step.action, where, issues)
+        elif isinstance(step, Switchover):
+            self.group(step.client, where, issues)
 
     def refusal(self, step: ExpectRefusal, where: str, issues: list[Issue]) -> None:
         self.client(step.client, where, issues)
@@ -391,6 +407,28 @@ class _Checker:
                 Issue(
                     where,
                     f"{name!r} is a server, and only a client has an image to check",
+                )
+            )
+
+    def group(self, name: str, where: str, issues: list[Issue]) -> None:
+        """A switchover is of a client that connects to a redundancy group: two or more
+        stations."""
+        instance = self.instances.get(name)
+        if instance is None:
+            issues.append(Issue(where, f"{name!r} is not an instance of the bench"))
+            return
+        if instance.role != "client":
+            issues.append(
+                Issue(where, f"{name!r} is a server: a switchover is of a client")
+            )
+            return
+        stations = sum(1 for client, _ in self.connections if client == name)
+        if stations < 2:
+            issues.append(
+                Issue(
+                    where,
+                    f"{name!r} connects to {stations} station(s): a switchover needs a "
+                    "redundancy group of two or more",
                 )
             )
 

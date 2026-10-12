@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,9 +114,12 @@ class Client(Protocol):
 
 
 class BenchHandle(Protocol):
-    """A started bench: the control client of an instance, and its removal."""
+    """A started bench: the control client of an instance, the stop of one instance, and
+    the removal of the bench."""
 
     def client(self, instance: str) -> Client: ...
+
+    async def stop_instance(self, instance: str) -> object: ...
 
     async def stop(self, grace: int = 10) -> object: ...
 
@@ -252,13 +255,24 @@ class NoEngine:
 
 class _ManagedBench:
     """A started bench as the scenario's actions see it: the control clients of its
-    instances. An action that restarts an instance is refused: a restart of a managed
-    instance needs a fixed station port (D2)."""
+    instances. An instance is stopped for good: its container stays on the bench until
+    the run ends, and its logs are kept. An action that restarts an instance is refused:
+    a restart of a managed instance needs a fixed station port (D2).
 
-    def __init__(self, handle: BenchHandle, bench: TestBench) -> None:
+    `before_stop` runs before an instance stops, so the drop count of its log is read
+    while the instance can still answer (the run's drops are recorded then)."""
+
+    def __init__(
+        self,
+        handle: BenchHandle,
+        bench: TestBench,
+        before_stop: Callable[[str], Awaitable[None]],
+    ) -> None:
         self._handle = handle
         self._bench = bench
+        self._before_stop = before_stop
         self._clients: dict[str, Client] = {}
+        self.stopped: set[str] = set()
 
     def control(self, instance: str) -> Client:
         if instance not in self._clients:
@@ -268,11 +282,16 @@ class _ManagedBench:
     def clients_of(self, instance: str) -> list[str]:
         return [c.client for c in self._bench.connections if c.server == instance]
 
+    def stations_of(self, client: str) -> list[str]:
+        """The stations of a client, in the order its group starts them."""
+        return [c.server for c in self._bench.connections if c.client == client]
+
     async def stop(self, instance: str) -> None:
-        raise RunError(
-            f"{instance} cannot be stopped on a managed bench yet: a restart needs a "
-            "fixed station port (D2)"
-        )
+        if instance in self.stopped:
+            raise RunError(f"{instance} is already stopped")
+        await self._before_stop(instance)
+        await self._handle.stop_instance(instance)
+        self.stopped.add(instance)
 
     async def start(self, instance: str) -> None:
         raise RunError(
@@ -648,7 +667,11 @@ class Runner:
                 run_id, "error", {"detail": f"the bench did not start: {error}"}
             )
             return RunStatus.ERROR, "the bench did not start"
-        managed = _ManagedBench(handle, bench)
+
+        async def before_stop(name: str) -> None:
+            await self._record_drop(run_id, bench, managed, name)
+
+        managed = _ManagedBench(handle, bench, before_stop)
         status, reason = RunStatus.ERROR, "the run failed"
         try:
             result = await self._scenario(
@@ -712,38 +735,46 @@ class Runner:
         self, run_id: str, bench: TestBench, managed: _ManagedBench
     ) -> None:
         """Notes each runtime whose log dropped events, and each whose count cannot be
-        read: the run may lack that evidence, and its report says so (§7, §10)."""
+        read: the run may lack that evidence, and its report says so (§7, §10). A
+        stopped instance was read before its stop, so it is not read again."""
         for instance in bench.instances:
-            control = managed.control(instance.name)
-            try:
-                if instance.role == "client":
-                    body = await control.events()
-                else:
-                    body = await control.station_events()
-                dropped = int(body.get("dropped", 0))
-            except Exception as error:
-                self._runs.record(
-                    run_id,
-                    "gap",
-                    {
-                        "instance": instance.name,
-                        "dropped": None,
-                        "detail": "the drop count could not be read: "
-                        f"{type(error).__name__}: {error}",
-                    },
-                )
-                continue
-            if dropped:
-                self._runs.record(
-                    run_id,
-                    "gap",
-                    {
-                        "instance": instance.name,
-                        "dropped": dropped,
-                        "detail": f"the runtime's log dropped {dropped} events: some "
-                        f"evidence of {instance.name} is missing",
-                    },
-                )
+            if instance.name not in managed.stopped:
+                await self._record_drop(run_id, bench, managed, instance.name)
+
+    async def _record_drop(
+        self, run_id: str, bench: TestBench, managed: _ManagedBench, name: str
+    ) -> None:
+        role = next(i.role for i in bench.instances if i.name == name)
+        control = managed.control(name)
+        try:
+            if role == "client":
+                body = await control.events()
+            else:
+                body = await control.station_events()
+            dropped = int(body.get("dropped", 0))
+        except Exception as error:
+            self._runs.record(
+                run_id,
+                "gap",
+                {
+                    "instance": name,
+                    "dropped": None,
+                    "detail": "the drop count could not be read: "
+                    f"{type(error).__name__}: {error}",
+                },
+            )
+            return
+        if dropped:
+            self._runs.record(
+                run_id,
+                "gap",
+                {
+                    "instance": name,
+                    "dropped": dropped,
+                    "detail": f"the runtime's log dropped {dropped} events: some "
+                    f"evidence of {name} is missing",
+                },
+            )
 
     async def _stop(self, run_id: str, handle: BenchHandle) -> bool:
         try:

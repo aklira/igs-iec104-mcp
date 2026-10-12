@@ -92,10 +92,12 @@ class FakeBench:
         clients: dict[str, list[str]],
         *,
         disconnects: bool = True,
+        stations: dict[str, list[str]] | None = None,
     ) -> None:
         self.controls = controls
         self.clients = clients
         self.disconnects = disconnects
+        self.stations = stations or {}
         self.stopped: list[str] = []
         self.started: list[str] = []
 
@@ -104,6 +106,9 @@ class FakeBench:
 
     def clients_of(self, instance: str) -> list[str]:
         return self.clients.get(instance, [])
+
+    def stations_of(self, client: str) -> list[str]:
+        return self.stations.get(client, [])
 
     async def stop(self, instance: str) -> None:
         self.stopped.append(instance)
@@ -193,7 +198,7 @@ async def test_stop_waits_for_the_connected_client_to_disconnect() -> None:
     assert result.status is RunStatus.PASSED
     assert bench.stopped == [STATION]
     assert client.state["connection"] == "down"
-    assert result.verdicts[0].detail == (f"{STATION} stopped; 1 client(s) disconnected")
+    assert result.verdicts[0].detail == f"{STATION} stopped; 1 client(s) lost it"
 
 
 async def test_stop_of_a_station_without_a_connected_client_passes_at_once() -> None:
@@ -202,7 +207,7 @@ async def test_stop_of_a_station_without_a_connected_client_passes_at_once() -> 
     bench = FakeBench({CLIENT: client, STATION: station}, {STATION: [CLIENT]})
     result = await run(bench, {"action": "stop_instance", "instance": STATION})
     assert result.status is RunStatus.PASSED
-    assert result.verdicts[0].detail == f"{STATION} stopped; 0 client(s) disconnected"
+    assert result.verdicts[0].detail == f"{STATION} stopped; 0 client(s) lost it"
 
 
 async def test_a_client_that_never_disconnects_times_the_stop_out() -> None:
@@ -218,6 +223,131 @@ async def test_a_client_that_never_disconnects_times_the_stop_out() -> None:
     assert result.status is RunStatus.FAILED
     assert result.verdicts[0].outcome is Outcome.TIMED_OUT
     assert result.verdicts[0].detail == "no result within 0.3 s"
+
+
+GROUP = [STATION, "server-2"]
+
+
+def record(control: FakeControl, kind: str, **fields: Any) -> None:
+    """Appends an event to a fake control, after the events it already holds."""
+    seq = len(control.events_kept) + 1
+    control.events_kept.append({"seq": seq, "kind": kind, **fields})
+
+
+class GroupBench(FakeBench):
+    """A client of two stations. A stop records the loss of the stopped station's
+    endpoint on the client. When the started station is lost, the group moves to the
+    other station: it records the switchover, and starts the transfer there. `moves`
+    false keeps the group where it is; `records` false stops without any event."""
+
+    def __init__(
+        self, client: FakeControl, *, moves: bool = True, records: bool = True
+    ) -> None:
+        controls = {CLIENT: client, **{s: FakeControl() for s in GROUP}}
+        super().__init__(
+            controls,
+            {s: [CLIENT] for s in GROUP},
+            stations={CLIENT: GROUP},
+        )
+        self.moves = moves
+        self.records = records
+
+    async def stop(self, instance: str) -> None:
+        self.stopped.append(instance)
+        client = self.controls[CLIENT]
+        index = GROUP.index(instance)
+        if not self.records:
+            return
+        record(client, "disconnected", endpoint=index, generation=1)
+        if client.state.get("started_endpoint") != index:
+            return
+        if not self.moves:
+            client.state["connection"] = "down"  # no other station is connected
+            return
+        other = 1 - index
+        record(client, "switched", **{"from": index, "to": other, "generation": 2})
+        client.state["started_endpoint"] = other
+        client.state["transfer"] = "started"
+
+
+def started_group(**state: Any) -> FakeControl:
+    client = FakeControl(connection="up", transfer="started")
+    client.state.update({"endpoints": 2, "started_endpoint": 0, **state})
+    return client
+
+
+async def test_a_switchover_stops_the_started_station_and_waits_for_the_move() -> None:
+    client = started_group()
+    bench = GroupBench(client)
+    result = await run(bench, {"action": "switchover", "client": CLIENT})
+    assert result.status is RunStatus.PASSED
+    assert bench.stopped == [STATION]
+    assert result.verdicts[0].detail == (
+        f"{CLIENT} switched from {STATION} to server-2; transfer started"
+    )
+
+
+async def test_a_switchover_without_a_started_station_fails() -> None:
+    client = started_group(started_endpoint=None)
+    bench = GroupBench(client)
+    result = await run(bench, {"action": "switchover", "client": CLIENT})
+    assert result.status is RunStatus.FAILED
+    assert bench.stopped == [], "nothing is stopped"
+    assert "has no started station" in result.verdicts[0].detail
+
+
+async def test_a_switchover_that_does_not_happen_times_out() -> None:
+    client = started_group()
+    bench = GroupBench(client, moves=False)
+    result = await run(
+        bench,
+        {"action": "switchover", "client": CLIENT, "timeout": "300ms"},
+    )
+    assert result.status is RunStatus.FAILED
+    assert result.verdicts[0].outcome is Outcome.TIMED_OUT
+
+
+async def test_a_stop_of_a_standby_station_waits_for_its_endpoint_loss() -> None:
+    client = started_group()
+    bench = GroupBench(client)
+    result = await run(bench, {"action": "stop_instance", "instance": "server-2"})
+    assert result.status is RunStatus.PASSED
+    assert result.verdicts[0].detail == "server-2 stopped; 1 client(s) lost it"
+    assert client.state["started_endpoint"] == 0, "the started station is kept"
+
+
+async def test_a_stop_of_the_started_station_ends_at_the_switchover() -> None:
+    client = started_group()
+    bench = GroupBench(client)
+    result = await run(bench, {"action": "stop_instance", "instance": STATION})
+    assert result.status is RunStatus.PASSED
+    assert result.verdicts[0].detail == f"{STATION} stopped; 1 client(s) lost it"
+    assert [e["kind"] for e in client.events_kept] == ["disconnected", "switched"]
+    assert client.state["started_endpoint"] == 1
+    assert client.state["transfer"] == "started"
+
+
+async def test_a_stop_of_the_only_connected_station_ends_when_the_group_is_down() -> (
+    None
+):
+    client = started_group()
+    bench = GroupBench(client, moves=False)
+    result = await run(bench, {"action": "stop_instance", "instance": STATION})
+    assert result.status is RunStatus.PASSED
+    assert result.verdicts[0].detail == f"{STATION} stopped; 1 client(s) lost it"
+    assert client.state["connection"] == "down"
+
+
+async def test_an_earlier_loss_of_the_endpoint_does_not_satisfy_the_stop() -> None:
+    client = started_group()
+    record(client, "disconnected", endpoint=1, generation=1)
+    bench = GroupBench(client, records=False)
+    result = await run(
+        bench,
+        {"action": "stop_instance", "instance": "server-2", "timeout": "300ms"},
+    )
+    assert result.status is RunStatus.FAILED
+    assert result.verdicts[0].outcome is Outcome.TIMED_OUT
 
 
 async def test_an_update_passes_once_the_station_stores_the_value() -> None:

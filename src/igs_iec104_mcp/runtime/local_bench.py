@@ -122,6 +122,10 @@ class LocalBench:
         """The clients connected to a station."""
         return [self._client] if instance == self._station else []
 
+    def stations_of(self, client: str) -> list[str]:
+        """The stations of a client: one, the station of this bench."""
+        return [self._station] if client == self._client else []
+
     async def aclose(self) -> None:
         """Stops every running instance: the client first, then the station."""
         for instance in (self._client, self._station):

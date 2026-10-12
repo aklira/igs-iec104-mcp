@@ -114,6 +114,18 @@ class RunningBench:
         declares it: `advertise:host_port`. None for a station that is not published."""
         return self.members[instance].advertised
 
+    async def stop_instance(self, instance: str, grace: int = 10) -> int | None:
+        """Stops one runtime's container, with SIGTERM and a deadline of `grace`
+        seconds, and keeps its logs and record as `<instance>-stopped` in the evidence.
+        The container stays until the bench stops: a stopped instance is not started
+        again, because a restart needs a fixed port (D2). Returns its exit code."""
+        member = self.members[instance]
+        await self._adapter.stop_container(member.resource, grace)
+        await _preserve(
+            self._adapter, member.resource, f"{instance}-stopped", self.evidence
+        )
+        return await _exit_code(self._adapter, member.resource)
+
     async def stop(self, grace: int = 10) -> StopReport:
         """Stops the clients, then the stations, with SIGTERM and a deadline of `grace`
         seconds. Each runtime's logs and record, and its relay's, are kept before the

@@ -208,6 +208,30 @@ def test_an_external_target_cannot_be_stopped_or_started() -> None:
     assert any("the bench does not manage" in p for p in found)
 
 
+def group_bench() -> Bench:
+    """The bench with a second station, and the client connected to both."""
+    data = copy.deepcopy(BENCH)
+    station = next(i for i in data["instances"] if i["name"] == "server-1")
+    data["instances"].append({**station, "name": "server-2", "common_address": 2})
+    data["connections"].append({"client": "client-1", "server": "server-2"})
+    return Bench.model_validate(data)
+
+
+def test_a_switchover_needs_a_client_of_a_redundancy_group() -> None:
+    data = copy.deepcopy(SCENARIO)
+    data["steps"] = [{"action": "switchover", "client": "client-1"}]
+    found = problems(data)
+    assert any("needs a redundancy group" in p for p in found)
+    data["steps"] = [{"action": "switchover", "client": "server-1"}]
+    assert any("is a server: a switchover is of a client" in p for p in problems(data))
+
+
+def test_a_switchover_of_a_group_is_valid() -> None:
+    data = copy.deepcopy(SCENARIO)
+    data["steps"] = [{"action": "switchover", "client": "client-1"}]
+    check_scenario(Scenario.model_validate(data), group_bench())
+
+
 def test_a_parallel_branch_with_no_step_is_refused() -> None:
     data = copy.deepcopy(SCENARIO)
     data["steps"] = [{"action": "parallel", "branches": [[]]}]

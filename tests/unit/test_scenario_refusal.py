@@ -93,6 +93,9 @@ class FakeBench:
     def clients_of(self, instance: str) -> list[str]:
         return ["client-1"]
 
+    def stations_of(self, client: str) -> list[str]:
+        return ["server-1"]
+
     async def stop(self, instance: str) -> None:
         return None
 

@@ -21,7 +21,9 @@ from test_scenario_runner import (
     settled,
 )
 
+from igs_iec104_mcp.definitions import service
 from igs_iec104_mcp.definitions.service import ServiceError
+from igs_iec104_mcp.definitions.store import ProjectStore
 from igs_iec104_mcp.docker.labels import Ownership
 from igs_iec104_mcp.models.run import RunStatus
 from igs_iec104_mcp.reporting.reports import report_of
@@ -202,6 +204,57 @@ async def test_drops_and_unreadable_counts_are_gaps_in_the_run(tmp_path: Path) -
     document = json.loads(report_of(runs, run_id, "json").content)
     assert {note["kind"] for note in document["notes"]} == {"gap"}
     assert kinds(runs, run_id).index("gap") < kinds(runs, run_id).index("stopped")
+
+
+STOP_STATION = """\
+schema_version: 1
+name: stop-station
+bench: basic-pair
+steps:
+  - action: stop_instance
+    instance: server-1
+    timeout: 5s
+"""
+
+
+STOP_TWICE = """\
+schema_version: 1
+name: stop-twice
+bench: basic-pair
+steps:
+  - action: stop_instance
+    instance: server-1
+    timeout: 5s
+  - action: stop_instance
+    instance: server-1
+    timeout: 5s
+"""
+
+
+async def test_an_instance_is_stopped_once_for_good(tmp_path: Path) -> None:
+    store, runs = project(tmp_path)
+    service.create(ProjectStore(tmp_path), "scenario", "stop-twice", STOP_TWICE)
+    runner = Runner(store, runs, FakeEngine())
+    run_id = await finished_run(runner, "stop-twice")
+    assert runs.get(run_id).status is RunStatus.ERROR
+    verdicts = [e for e in runs.events(run_id).events if e["kind"] == "verdict"]
+    assert verdicts[-1]["outcome"] == "error"
+    assert "already stopped" in verdicts[-1]["detail"]
+
+
+async def test_a_stopped_instance_is_read_once_before_it_stops(tmp_path: Path) -> None:
+    store, runs = project(tmp_path)
+    service.create(ProjectStore(tmp_path), "scenario", "stop-station", STOP_STATION)
+    runner = Runner(store, runs, DroppingEngine())
+    run_id = await finished_run(runner, "stop-station")
+    gaps = [e for e in runs.events(run_id).events if e["kind"] == "gap"]
+    station = [g for g in gaps if g["instance"] == "server-1"]
+    assert len(station) == 1, "the stopped station is read before its stop, only"
+    assert "could not be read" in station[0]["detail"]
+    assert any(g["instance"] == "client-1" for g in gaps), (
+        "the client is read at the end"
+    )
+    assert runs.get(run_id).status is RunStatus.PASSED
 
 
 async def test_a_clean_run_has_no_gap(tmp_path: Path) -> None:

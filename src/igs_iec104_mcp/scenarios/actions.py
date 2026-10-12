@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from igs_iec104_mcp.scenarios.engine import Context, Handler, StepFailed
@@ -44,16 +45,33 @@ class Control(Protocol):
 
 
 class Bench(Protocol):
-    """The instances of a bench: their control APIs, the clients of each station, and
-    how each instance is stopped and started again."""
+    """The instances of a bench: their control APIs, the clients of each station, the
+    stations of each client in the order of its group, and how each instance is stopped
+    and started again."""
 
     def control(self, instance: str) -> Control: ...
 
     def clients_of(self, instance: str) -> list[str]: ...
 
+    def stations_of(self, client: str) -> list[str]: ...
+
     async def stop(self, instance: str) -> None: ...
 
     async def start(self, instance: str) -> None: ...
+
+
+@dataclass(frozen=True)
+class _Link:
+    """A client connected to an instance that a stop takes down. `endpoint` is the
+    instance's index in the client's group, None for a client of one station. `started`
+    is true when the group had started that station. `cursor` is the client's last event
+    before the stop."""
+
+    client: str
+    control: Control
+    endpoint: int | None
+    started: bool
+    cursor: int
 
 
 async def _poll(check: Callable[[], Awaitable[str | None]]) -> str:
@@ -157,15 +175,35 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
 
     async def stop_instance(step: Any, context: Context) -> str:
         instance = step.instance
-        connected = [
-            client
-            for client in bench.clients_of(instance)
-            if (await bench.control(client).ready()).get("connection") == "up"
-        ]
+        links = await _links_of(bench, instance)
         await bench.stop(instance)
-        for client in connected:
-            await _wait_down(bench.control(client), client)
-        return f"{instance} stopped; {len(connected)} client(s) disconnected"
+        for link in links:
+            await _wait_lost(link)
+        return f"{instance} stopped; {len(links)} client(s) lost it"
+
+    async def switchover(step: Any, context: Context) -> str:
+        """Stops the station that a group has started. The group then starts the
+        transfer of another connected station, and the step waits for that switchover:
+        the `switched` event after the cursor, and the transfer started on the new
+        station."""
+        control = bench.control(step.client)
+        started = (await control.ready()).get("started_endpoint")
+        if started is None:
+            raise StepFailed(f"{step.client} has no started station to stop")
+        stations = bench.stations_of(step.client)
+        cursor = int((await control.events())["last_seq"])
+        await bench.stop(stations[started])
+
+        async def switched() -> str | None:
+            to = await _moved(control, started, cursor)
+            if to is None:
+                return None
+            return (
+                f"{step.client} switched from {stations[started]} to "
+                f"{stations[to]}; transfer started"
+            )
+
+        return await _poll(switched)
 
     async def start_instance(step: Any, context: Context) -> str:
         await bench.start(step.instance)
@@ -179,8 +217,83 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         "general_interrogation": general_interrogation,
         "update_point": update_point,
         "stop_instance": stop_instance,
+        "switchover": switchover,
         "start_instance": start_instance,
     }
+
+
+async def _links_of(bench: Bench, instance: str) -> list[_Link]:
+    """The clients that are connected to an instance, with the cursor of each, before
+    the instance is stopped. A group client is connected while any of its stations is,
+    so the link to this station is what the step waits for."""
+    links: list[_Link] = []
+    for client in bench.clients_of(instance):
+        control = bench.control(client)
+        state = await control.ready()
+        if state.get("connection") != "up":
+            continue
+        stations = bench.stations_of(client)
+        endpoint = stations.index(instance) if len(stations) > 1 else None
+        started = endpoint is not None and state.get("started_endpoint") == endpoint
+        cursor = int((await control.events())["last_seq"])
+        links.append(_Link(client, control, endpoint, started, cursor))
+    return links
+
+
+async def _moved(control: Control, endpoint: int, cursor: int) -> int | None:
+    """The station a group switched to after the cursor, away from `endpoint`, once the
+    transfer is started there. None until then."""
+    body = await control.events(after=cursor)
+    moved = next(
+        (
+            event
+            for event in body["events"]
+            if event["kind"] == "switched" and event["from"] == endpoint
+        ),
+        None,
+    )
+    if moved is None:
+        return None
+    state = await control.ready()
+    if state.get("started_endpoint") != moved["to"]:
+        return None
+    if state.get("transfer") != "started":
+        return None
+    return int(moved["to"])
+
+
+async def _wait_lost(link: _Link) -> str:
+    """A client of one station is down once its connection is down. A group client
+    records the loss of the station's endpoint after the cursor, so an earlier loss
+    cannot satisfy the wait. When the lost station was the one the group started, the
+    wait ends at the switchover, with the transfer started on the new station, or when
+    no station is left connected: the next step then sees the group's state after the
+    loss, not before it."""
+    if link.endpoint is None:
+        return await _wait_down(link.control, link.client)
+
+    endpoint = link.endpoint
+    if link.started:
+
+        async def moved_or_down() -> str | None:
+            to = await _moved(link.control, endpoint, link.cursor)
+            if to is not None:
+                return f"{link.client} switched to endpoint {to}"
+            state = await link.control.ready()
+            if state.get("connection") == "down":
+                return f"{link.client} lost every station"
+            return None
+
+        return await _poll(moved_or_down)
+
+    async def lost() -> str | None:
+        body = await link.control.events(after=link.cursor)
+        for event in body["events"]:
+            if event["kind"] == "disconnected" and event.get("endpoint") == endpoint:
+                return f"{link.client} lost endpoint {endpoint}"
+        return None
+
+    return await _poll(lost)
 
 
 async def _wait_image(control: Control, client: str, step: Any) -> str:

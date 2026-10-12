@@ -116,9 +116,16 @@ class FakeHandle:
         self.engine = engine
         self.client_api = FakeClient(transfer=engine.transfer)
         self.stopped = False
+        self.stopped_instances: list[str] = []
 
     def client(self, instance: str) -> FakeClient:
         return self.client_api
+
+    async def stop_instance(self, instance: str) -> object:
+        """The client of the fake bench loses its connection with the station."""
+        self.stopped_instances.append(instance)
+        self.client_api.state["connection"] = "down"
+        return None
 
     async def stop(self, grace: int = 10) -> object:
         if self.engine.stop_error is not None:
