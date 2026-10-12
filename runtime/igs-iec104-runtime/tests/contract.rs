@@ -289,6 +289,7 @@ fn station_definition_of(kind: &str) -> Option<&'static str> {
         "superseded" => "Superseded",
         "closed" => "Closed",
         "command" => "Command",
+        "security" => "Security",
         _ => return None,
     })
 }
@@ -318,6 +319,12 @@ fn station_samples() -> Vec<StationEventKind> {
             command: "single",
             select: true,
             accepted: false,
+        },
+        StationEventKind::Security {
+            mnemonic: "NoCaMatch".to_owned(),
+            severity: "alarm".to_owned(),
+            identifier: "IEC 62351-3:6.4".to_owned(),
+            detail: "the chain has no trust anchor".to_owned(),
         },
     ]
 }

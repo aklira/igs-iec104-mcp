@@ -163,10 +163,12 @@ async def start_bench(
     ready_timeout: float = 30.0,
     checkpoint: Checkpoint | None = None,
     material: Mapping[str, Mapping[str, bytes]] | None = None,
+    await_clients: bool = True,
 ) -> RunningBench:
     """Starts a bench: the networks, then each station and its readiness, then each
-    client,
-    connected to its station. The plan is checked first, and so is the material: each
+    client, connected to its station. With `await_clients` false, a client is not waited
+    for: a refused client is then the state the scenario expects, and its connection is
+    what the scenario checks. The plan is checked first, and so is the material: each
     runtime with TLS needs its files, given by instance name and file name. A failure
     rolls back what was created, after the evidence of the containers that ran is kept.
 
@@ -218,6 +220,7 @@ async def start_bench(
                     steps=steps,
                     ready_timeout=ready_timeout,
                     material=material,
+                    await_clients=await_clients,
                 )
             except BaseException:
                 await _preserve_created(adapter, creation.created, evidence)
@@ -267,6 +270,7 @@ async def _bring_up(
     steps: _Steps,
     ready_timeout: float,
     material: Mapping[str, Mapping[str, bytes]],
+    await_clients: bool = True,
 ) -> dict[str, Member]:
     for network in plan.networks:
         await steps(f"network:{network.name}")
@@ -303,6 +307,7 @@ async def _bring_up(
             ready_timeout=ready_timeout,
             connect=address,
             files=material.get(client.name, {}),
+            await_connection=await_clients,
         )
     return members
 
@@ -320,6 +325,7 @@ async def _launch(
     ready_timeout: float,
     connect: str | None,
     files: Mapping[str, bytes],
+    await_connection: bool = True,
 ) -> Member:
     """A runtime and its relay: the runtime starts on its network, then the relay is
     created on the control network (where the engine publishes its port) and joined to
@@ -382,15 +388,16 @@ async def _launch(
     if runtime.role == "server":
         listen = str(body["listen_address"])
     else:
-        await steps(f"connect:{name}")
-        await _await(
-            adapter,
-            resource,
-            control,
-            token,
-            ready_timeout,
-            lambda body: body.get("connection") == "up",
-        )
+        if await_connection:
+            await steps(f"connect:{name}")
+            await _await(
+                adapter,
+                resource,
+                control,
+                token,
+                ready_timeout,
+                lambda body: body.get("connection") == "up",
+            )
     return Member(
         runtime=runtime,
         resource=resource,

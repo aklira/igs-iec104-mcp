@@ -8,14 +8,39 @@
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use igs_iec104::tls::events::Discard;
+use igs_iec104::tls::events::{SecurityEvent, SecurityEvents};
 use igs_iec104::tls::openssl_backend::OpensslBackend;
 use igs_iec104::tls::settings::{Identity, TlsSettings, TrustAnchors};
 use igs_iec104::tls::{Secure, TlsError};
 
 use crate::config::TlsFiles;
+use crate::station_log::{StationEventKind, StationLog};
+
+/// The security events of a station's handshakes, recorded in its log as they are raised, so that
+/// a refused client leaves its reason in the station's events (IMPLEMENTATION.md §9; task V1c).
+pub struct StationSecurity {
+    log: Arc<Mutex<StationLog>>,
+}
+
+impl StationSecurity {
+    /// The receiver that records into `log`.
+    pub fn new(log: Arc<Mutex<StationLog>>) -> Self {
+        Self { log }
+    }
+}
+
+impl SecurityEvents for StationSecurity {
+    fn raise(&self, event: SecurityEvent, detail: &str) {
+        crate::lock(&self.log).record(StationEventKind::Security {
+            mnemonic: event.mnemonic().to_owned(),
+            severity: event.severity().to_string(),
+            identifier: event.identifier(),
+            detail: detail.to_owned(),
+        });
+    }
+}
 
 /// Why the TLS files cannot secure the connections.
 #[derive(Debug)]
@@ -50,17 +75,18 @@ impl std::error::Error for TlsSetupError {}
 
 /// The secure wrapper of the runtime's connections, built from its TLS files. The settings of the
 /// library are checked against the profile first. The chain is the certificate, then the
-/// intermediates in the order they were given.
-pub fn secure(files: &TlsFiles) -> Result<Secure, TlsSetupError> {
+/// intermediates in the order they were given. The handshakes raise their security events to
+/// `events`.
+pub fn secure(files: &TlsFiles, events: Arc<dyn SecurityEvents>) -> Result<Secure, TlsSetupError> {
     let mut chain = vec![read(&files.certificate)?];
     for intermediate in &files.intermediates {
         chain.push(read(intermediate)?);
     }
     let key = read(&files.key)?;
     let trust = read(&files.trust)?;
-    let identity = Identity::new(chain, key, &Discard).map_err(TlsSetupError::Settings)?;
+    let identity = Identity::new(chain, key, events.as_ref()).map_err(TlsSetupError::Settings)?;
     let anchors = TrustAnchors::new(vec![trust]).map_err(TlsSetupError::Settings)?;
-    let settings = TlsSettings::new(identity, anchors, Arc::new(Discard));
+    let settings = TlsSettings::new(identity, anchors, events);
     settings.validate().map_err(TlsSetupError::Settings)?;
     let backend = OpensslBackend::new(&settings).map_err(TlsSetupError::Settings)?;
     Ok(Secure::new(backend))
@@ -76,6 +102,7 @@ fn read(path: &Path) -> Result<Vec<u8>, TlsSetupError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use igs_iec104::tls::events::Discard;
 
     #[test]
     fn a_missing_file_is_named_and_refused() {
@@ -86,7 +113,7 @@ mod tests {
             server_name: None,
             intermediates: Vec::new(),
         };
-        match secure(&files) {
+        match secure(&files, Arc::new(Discard)) {
             Err(TlsSetupError::File { path, .. }) => {
                 assert_eq!(path, PathBuf::from("/nonexistent/c.der"));
             }
@@ -108,7 +135,7 @@ mod tests {
             server_name: None,
             intermediates: Vec::new(),
         };
-        let result = secure(&files);
+        let result = secure(&files, Arc::new(Discard));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(matches!(result, Err(TlsSetupError::Settings(_))));
     }

@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use igs_iec104::server::{ServerEvent, ServerEvents, ServerHandle, ShutdownReport};
+use igs_iec104::tls::events::{Discard, SecurityEvents};
+use igs_iec104::tls::Secure;
 use igs_iec104::Client;
 use igs_iec104_codec::header::CommonAddress;
 use tokio::net::TcpListener;
@@ -21,10 +23,11 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::client_role::{self, transfer_name_of, Recorder, Request};
-use crate::config::{Config, Role, DEFAULT_EVENT_CAPACITY};
+use crate::config::{Config, Role, TlsFiles, DEFAULT_EVENT_CAPACITY};
 use crate::points::{self, PointError, PointSpec};
 use crate::server_role::{self, CommandRecord, Policy, StationError, StationSettings};
 use crate::station_log::{StationEventKind, StationLog};
+use crate::tls::StationSecurity;
 use crate::tls::{self, TlsSetupError};
 use crate::token::{ControlToken, TokenError};
 
@@ -147,14 +150,9 @@ impl Runtime {
             .await
             .map_err(BindError::Io)?;
         let control_address = control.local_addr().map_err(BindError::Io)?;
-        let secure = config
-            .tls
-            .as_ref()
-            .map(tls::secure)
-            .transpose()
-            .map_err(BindError::Tls)?;
         let (engine, client, server) = match config.role {
             Role::Client { connect } => {
+                let secure = secured(config.tls.as_ref(), Arc::new(Discard))?;
                 // A client checks the station's certificate against the server name, or against
                 // the address it connects to.
                 let host = config
@@ -190,6 +188,17 @@ impl Runtime {
                 selection_timeout,
             } => {
                 let points = points::load(&points).map_err(BindError::Points)?;
+                // The log exists before the station binds: the handshakes record into it, so a
+                // refused client leaves its reason there. The log keeps at least the default, so
+                // that a small stream queue loses events before the log does, and the loss is
+                // what the stream counted.
+                let log = Arc::new(Mutex::new(StationLog::new(
+                    config.event_capacity.max(DEFAULT_EVENT_CAPACITY),
+                )));
+                let secure = secured(
+                    config.tls.as_ref(),
+                    Arc::new(StationSecurity::new(Arc::clone(&log))),
+                )?;
                 let settings = StationSettings {
                     common_address: config.common_address,
                     event_capacity: NonZeroUsize::new(config.event_capacity)
@@ -200,11 +209,6 @@ impl Runtime {
                 let station = server_role::bind(listen, settings, points, secure)
                     .await
                     .map_err(BindError::Station)?;
-                // The log keeps at least the default, so that a small stream queue loses events
-                // before the log does, and the loss is what the stream counted.
-                let log = Arc::new(Mutex::new(StationLog::new(
-                    config.event_capacity.max(DEFAULT_EVENT_CAPACITY),
-                )));
                 let link = ServerLink {
                     handle: station.handle,
                     listen: station.listen,
@@ -373,4 +377,15 @@ fn station_kind(event: &ServerEvent) -> StationEventKind {
             }
         }
     }
+}
+
+/// The secure wrapper of a role's connections, when the configuration names TLS files. The
+/// handshakes raise their security events to `events`.
+fn secured(
+    tls: Option<&TlsFiles>,
+    events: Arc<dyn SecurityEvents>,
+) -> Result<Option<Secure>, BindError> {
+    tls.map(|files| tls::secure(files, events))
+        .transpose()
+        .map_err(BindError::Tls)
 }

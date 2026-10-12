@@ -166,7 +166,12 @@ class DroppingHandle(FakeHandle):
 
 class DroppingEngine(FakeEngine):
     async def start(
-        self, bench: Any, run_id: str, evidence: Path, material: Any
+        self,
+        bench: Any,
+        run_id: str,
+        evidence: Path,
+        material: Any,
+        await_clients: bool,
     ) -> DroppingHandle:
         handle = DroppingHandle(self)
         self.handles.append(handle)

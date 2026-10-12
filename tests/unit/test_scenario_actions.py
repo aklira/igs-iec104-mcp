@@ -48,6 +48,9 @@ class FakeControl:
     async def ready(self) -> dict[str, Any]:
         return dict(self.state)
 
+    async def station_events(self, after: int = 0) -> dict[str, Any]:
+        return {"events": [], "last_seq": 0}
+
     async def events(self, after: int = 0) -> dict[str, Any]:
         kept = [event for event in self.events_kept if event["seq"] > after]
         last = max((event["seq"] for event in self.events_kept), default=0)

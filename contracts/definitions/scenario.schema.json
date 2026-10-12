@@ -191,6 +191,39 @@
       "title": "ExpectPoint",
       "type": "object"
     },
+    "ExpectRefusal": {
+      "additionalProperties": false,
+      "description": "Expects a client's connection to be refused. The step passes when the station\nrecords a security alarm for the handshake, or the client records that it was\nrefused, and the station accepts no connection in the meantime. A station that\naccepts the connection fails the step (\u00a77, \u00a78).",
+      "properties": {
+        "action": {
+          "const": "expect_refusal",
+          "title": "Action",
+          "type": "string"
+        },
+        "client": {
+          "description": "The client whose connection is refused.",
+          "title": "Client",
+          "type": "string"
+        },
+        "server": {
+          "description": "The station the client connects to.",
+          "title": "Server",
+          "type": "string"
+        },
+        "timeout": {
+          "default": "10s",
+          "title": "Timeout",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "client",
+        "server"
+      ],
+      "title": "ExpectRefusal",
+      "type": "object"
+    },
     "GeneralInterrogation": {
       "additionalProperties": false,
       "properties": {
@@ -232,6 +265,7 @@
                 "mapping": {
                   "assert_point": "#/$defs/AssertPoint",
                   "expect_point": "#/$defs/ExpectPoint",
+                  "expect_refusal": "#/$defs/ExpectRefusal",
                   "general_interrogation": "#/$defs/GeneralInterrogation",
                   "parallel": "#/$defs/Parallel",
                   "send_command": "#/$defs/SendCommand",
@@ -250,6 +284,9 @@
                 },
                 {
                   "$ref": "#/$defs/WaitConnection"
+                },
+                {
+                  "$ref": "#/$defs/ExpectRefusal"
                 },
                 {
                   "$ref": "#/$defs/GeneralInterrogation"
@@ -629,6 +666,7 @@
           "mapping": {
             "assert_point": "#/$defs/AssertPoint",
             "expect_point": "#/$defs/ExpectPoint",
+            "expect_refusal": "#/$defs/ExpectRefusal",
             "general_interrogation": "#/$defs/GeneralInterrogation",
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
@@ -647,6 +685,9 @@
           },
           {
             "$ref": "#/$defs/WaitConnection"
+          },
+          {
+            "$ref": "#/$defs/ExpectRefusal"
           },
           {
             "$ref": "#/$defs/GeneralInterrogation"
@@ -713,6 +754,7 @@
           "mapping": {
             "assert_point": "#/$defs/AssertPoint",
             "expect_point": "#/$defs/ExpectPoint",
+            "expect_refusal": "#/$defs/ExpectRefusal",
             "general_interrogation": "#/$defs/GeneralInterrogation",
             "parallel": "#/$defs/Parallel",
             "send_command": "#/$defs/SendCommand",
@@ -731,6 +773,9 @@
           },
           {
             "$ref": "#/$defs/WaitConnection"
+          },
+          {
+            "$ref": "#/$defs/ExpectRefusal"
           },
           {
             "$ref": "#/$defs/GeneralInterrogation"

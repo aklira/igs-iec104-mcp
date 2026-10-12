@@ -67,10 +67,15 @@ class RecordingEngine(FakeEngine):
         self.material: dict[str, dict[str, bytes]] | None = None
 
     async def start(
-        self, bench: Any, run_id: str, evidence: Path, material: Any
+        self,
+        bench: Any,
+        run_id: str,
+        evidence: Path,
+        material: Any,
+        await_clients: bool,
     ) -> FakeHandle:
         self.material = material
-        return await super().start(bench, run_id, evidence, material)
+        return await super().start(bench, run_id, evidence, material, await_clients)
 
 
 def secrets_dir(tmp_path: Path, files: dict[str, bytes]) -> Path:

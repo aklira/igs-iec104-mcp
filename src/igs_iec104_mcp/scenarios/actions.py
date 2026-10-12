@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
-from igs_iec104_mcp.scenarios.engine import Context, Handler
+from igs_iec104_mcp.scenarios.engine import Context, Handler, StepFailed
 
 POLL_SECONDS = 0.05
 # The cause of transmission that ends an interrogation (IEC 60870-5-104 §8).
@@ -29,6 +29,8 @@ class Control(Protocol):
     async def ready(self) -> dict[str, Any]: ...
 
     async def events(self, after: int = 0) -> dict[str, Any]: ...
+
+    async def station_events(self, after: int = 0) -> dict[str, Any]: ...
 
     async def start_transfer(self) -> dict[str, Any]: ...
 
@@ -85,6 +87,30 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
         control = bench.control(step.client)
         await control.start_transfer()
         return await _wait_transfer(control, step.client)
+
+    async def expect_refusal(step: Any, context: Context) -> str:
+        """The refusal is seen by the station, which records its security alarm and
+        accepts no connection, or by the client, which records that it was refused."""
+        client = bench.control(step.client)
+        station = bench.control(step.server)
+        client_cursor = int((await client.events())["last_seq"])
+        station_cursor = int((await station.station_events())["last_seq"])
+
+        async def refused() -> str | None:
+            seen = await station.station_events(after=station_cursor)
+            if any(event["kind"] == "connected" for event in seen["events"]):
+                raise StepFailed(
+                    f"{step.server} accepted a connection: the refusal did not happen"
+                )
+            for event in seen["events"]:
+                if event["kind"] == "security" and event["severity"] == "alarm":
+                    return f"{step.server} refused the handshake: {event['mnemonic']}"
+            for event in (await client.events(after=client_cursor))["events"]:
+                if event["kind"] == "connect_failed":
+                    return f"{step.client} was refused: {event['error']}"
+            return None
+
+        return await _poll(refused)
 
     async def wait_transfer_started(step: Any, context: Context) -> str:
         return await _wait_transfer(bench.control(step.client), step.client)
@@ -147,6 +173,7 @@ def actions_for(bench: Bench) -> Mapping[str, Handler]:
 
     return {
         "wait_connection": wait_connection,
+        "expect_refusal": expect_refusal,
         "start_transfer": start_transfer,
         "wait_transfer_started": wait_transfer_started,
         "general_interrogation": general_interrogation,

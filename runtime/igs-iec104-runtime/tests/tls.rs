@@ -337,6 +337,13 @@ async fn a_secured_client_reaches_a_secured_station_and_starts_its_transfer() {
         body["transfer"] == "started"
     })
     .await;
+    // The station records the handshake it accepted, as a notice.
+    wait_for(station.control, "/v1/station/events", |body| {
+        has_event(body, |event| {
+            event["kind"] == "security" && event["severity"] == "notice"
+        })
+    })
+    .await;
 
     client.stop().await;
     station.stop().await;
@@ -463,6 +470,44 @@ async fn a_station_that_sends_no_intermediate_is_refused_by_the_client() {
     assert_ne!(
         ready["connection"], "up",
         "the issuer is missing from the chain"
+    );
+
+    client.stop().await;
+    station.stop().await;
+}
+
+#[tokio::test]
+async fn a_station_that_does_not_trust_the_client_records_the_refusal_and_accepts_nothing() {
+    let pki = Pki::new("refused-by-station");
+    let token = TokenFile::new("refused-by-station");
+    // The station trusts only the other root, so the client's certificate, signed by the root, has
+    // no trust anchor on the station's side.
+    let station = station(&pki, &token, Some(pki.files("station", "other", None))).await;
+    let address = station.address.expect("the station listens");
+    let client = client(
+        address,
+        &token,
+        Some(pki.files("client", "root", Some(STATION_NAME))),
+    )
+    .await;
+
+    let body = wait_for(station.control, "/v1/station/events", |body| {
+        has_event(body, |event| {
+            event["kind"] == "security" && event["severity"] == "alarm"
+        })
+    })
+    .await;
+    let alarm = body["events"]
+        .as_array()
+        .and_then(|events| events.iter().find(|event| event["severity"] == "alarm"))
+        .expect("the alarm is recorded");
+    assert_eq!(
+        alarm["mnemonic"], "TLS_NO_CA_MATCH",
+        "the reason is named: {alarm}"
+    );
+    assert!(
+        !has_event(&body, |event| event["kind"] == "connected"),
+        "the station accepted no connection: {body}"
     );
 
     client.stop().await;

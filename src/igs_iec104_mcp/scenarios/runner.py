@@ -42,7 +42,13 @@ from igs_iec104_mcp.models.bench import TestBench
 from igs_iec104_mcp.models.common import DefinitionError
 from igs_iec104_mcp.models.instance import ResourceLimits
 from igs_iec104_mcp.models.run import TERMINAL, RunStatus, Verdict
-from igs_iec104_mcp.models.scenario import Scenario, check_scenario
+from igs_iec104_mcp.models.scenario import (
+    ExpectRefusal,
+    Parallel,
+    Scenario,
+    Step,
+    check_scenario,
+)
 from igs_iec104_mcp.reporting.reports import ReportOut, report_of
 from igs_iec104_mcp.runtime.pin import UPSTREAM_REVISION
 from igs_iec104_mcp.runtime.source import ControlSource
@@ -121,7 +127,12 @@ class Engine(Protocol):
     async def check(self) -> None: ...
 
     async def start(
-        self, bench: TestBench, run_id: str, evidence: Path, material: Material
+        self,
+        bench: TestBench,
+        run_id: str,
+        evidence: Path,
+        material: Material,
+        await_clients: bool,
     ) -> BenchHandle: ...
 
     async def owners(self) -> list[Ownership]: ...
@@ -154,7 +165,12 @@ class DockerEngine:
             raise EngineUnavailable(str(error)) from error
 
     async def start(
-        self, bench: TestBench, run_id: str, evidence: Path, material: Material
+        self,
+        bench: TestBench,
+        run_id: str,
+        evidence: Path,
+        material: Material,
+        await_clients: bool,
     ) -> BenchHandle:
         await self.check()
         adapter = self._adapter
@@ -169,6 +185,7 @@ class DockerEngine:
             relay=self._relay,
             evidence=evidence,
             material=material,
+            await_clients=await_clients,
         )
 
     def identities(self) -> dict[str, str]:
@@ -214,7 +231,12 @@ class NoEngine:
         raise EngineUnavailable(NO_ENGINE)
 
     async def start(
-        self, bench: TestBench, run_id: str, evidence: Path, material: Material
+        self,
+        bench: TestBench,
+        run_id: str,
+        evidence: Path,
+        material: Material,
+        await_clients: bool,
     ) -> BenchHandle:
         raise EngineUnavailable(NO_ENGINE)
 
@@ -382,8 +404,11 @@ class Runner:
             if digests:
                 self._runs.record(run_id, "secrets", {"items": digests})
         cancel = asyncio.Event()
+        await_clients = not _expects_refusal(scenario.steps)
         task = asyncio.create_task(
-            self._execute(run_id, bench, scenario, cancel, confirmer, material)
+            self._execute(
+                run_id, bench, scenario, cancel, confirmer, material, await_clients
+            )
         )
         self._running[run_id] = _Running(task=task, cancel=cancel)
         task.add_done_callback(lambda _: self._running.pop(run_id, None))
@@ -588,13 +613,14 @@ class Runner:
         cancel: asyncio.Event,
         confirmer: Confirmer | None,
         material: Material,
+        await_clients: bool,
     ) -> None:
         timer = asyncio.get_running_loop().call_later(
             _limit(bench), self._limit_reached, run_id, cancel
         )
         try:
             status, reason = await self._run(
-                run_id, bench, scenario, cancel, confirmer, material
+                run_id, bench, scenario, cancel, confirmer, material, await_clients
             )
         finally:
             timer.cancel()
@@ -609,11 +635,14 @@ class Runner:
         cancel: asyncio.Event,
         confirmer: Confirmer | None,
         material: Material,
+        await_clients: bool,
     ) -> tuple[RunStatus, str]:
         evidence = self._runs.root / RUNS_DIRECTORY / run_id / EVIDENCE
         self._runs.record(run_id, "engine", self._engine.identities())
         try:
-            handle = await self._engine.start(bench, run_id, evidence, material)
+            handle = await self._engine.start(
+                bench, run_id, evidence, material, await_clients
+            )
         except Exception as error:
             self._runs.record(
                 run_id, "error", {"detail": f"the bench did not start: {error}"}
@@ -736,6 +765,20 @@ class Runner:
             {"detail": "the execution time limit passed: the run is cancelled"},
         )
         cancel.set()
+
+
+def _expects_refusal(steps: list[Step]) -> bool:
+    """Whether a scenario expects a client's connection to be refused, at any depth.
+    Such a bench starts without waiting for its clients: the refusal is what it
+    checks."""
+    for step in steps:
+        if isinstance(step, ExpectRefusal):
+            return True
+        if isinstance(step, Parallel) and any(
+            _expects_refusal(branch) for branch in step.branches
+        ):
+            return True
+    return False
 
 
 def _refuse_unsupported(bench: TestBench) -> None:

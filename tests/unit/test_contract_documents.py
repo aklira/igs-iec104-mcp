@@ -29,7 +29,7 @@ def test_the_station_events_schema_is_valid_and_names_the_version(
     Draft202012Validator.check_schema(station)
     version = contract.api["info"]["version"]
     assert f"contract version {version}" in station["$comment"]
-    assert len(station["$defs"]["StationEvent"]["oneOf"]) == 5
+    assert len(station["$defs"]["StationEvent"]["oneOf"]) == 6
 
 
 def test_both_documents_name_the_same_contract_version(contract: Any) -> None:

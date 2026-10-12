@@ -29,6 +29,7 @@ from igs_iec104_mcp.models.target import Operation, undeclared
 ACTIONS: tuple[str, ...] = (
     "wait_transfer_started",
     "wait_connection",
+    "expect_refusal",
     "general_interrogation",
     "start_transfer",
     "assert_point",
@@ -57,6 +58,18 @@ class WaitConnection(Definition):
     instance: Name = Field(
         description="The instance or external target whose connection is awaited."
     )
+    timeout: Timing = DEFAULT_TIMEOUT
+
+
+class ExpectRefusal(Definition):
+    """Expects a client's connection to be refused. The step passes when the station
+    records a security alarm for the handshake, or the client records that it was
+    refused, and the station accepts no connection in the meantime. A station that
+    accepts the connection fails the step (§7, §8)."""
+
+    action: Literal["expect_refusal"]
+    client: Name = Field(description="The client whose connection is refused.")
+    server: Name = Field(description="The station the client connects to.")
     timeout: Timing = DEFAULT_TIMEOUT
 
 
@@ -223,6 +236,7 @@ class Parallel(Definition):
 Step = Annotated[
     WaitTransferStarted
     | WaitConnection
+    | ExpectRefusal
     | GeneralInterrogation
     | StartTransfer
     | AssertPoint
@@ -302,6 +316,7 @@ class _Checker:
     def __init__(self, bench: TestBench) -> None:
         self.instances = {instance.name: instance for instance in bench.instances}
         self.targets = {target.name: target for target in bench.external_targets}
+        self.connections = {(c.client, c.server) for c in bench.connections}
 
     def steps(self, steps: list[Step], where: str, issues: list[Issue]) -> None:
         for index, step in enumerate(steps):
@@ -324,12 +339,33 @@ class _Checker:
             self.client(step.client, where, issues)
         elif isinstance(step, WaitConnection):
             self.peer(step.instance, where, issues)
+        elif isinstance(step, ExpectRefusal):
+            self.refusal(step, where, issues)
         elif isinstance(step, UpdatePoint):
             self.update(step, where, issues)
         elif isinstance(step, SendCommand):
             self.command(step, where, issues)
         elif isinstance(step, (StopInstance, StartInstance)):
             self.managed(step.instance, step.action, where, issues)
+
+    def refusal(self, step: ExpectRefusal, where: str, issues: list[Issue]) -> None:
+        self.client(step.client, where, issues)
+        server = self.instances.get(step.server)
+        if server is None:
+            issues.append(
+                Issue(where, f"{step.server!r} is not an instance of the bench")
+            )
+        elif server.role != "server":
+            issues.append(
+                Issue(
+                    where,
+                    f"{step.server!r} is a client: a refusal is seen by a station",
+                )
+            )
+        elif (step.client, step.server) not in self.connections:
+            issues.append(
+                Issue(where, f"{step.client!r} does not connect to {step.server!r}")
+            )
 
     def peer(self, name: str, where: str, issues: list[Issue]) -> None:
         if name not in self.instances and name not in self.targets:

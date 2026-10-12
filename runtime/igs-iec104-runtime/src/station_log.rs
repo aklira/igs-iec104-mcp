@@ -41,6 +41,17 @@ pub enum StationEventKind {
         /// The error that ended it, for a transport end.
         error: Option<String>,
     },
+    /// A security event of a connection's TLS handshake, with the detail the backend gave.
+    Security {
+        /// The event's name in the security events of IEC 62351-3.
+        mnemonic: String,
+        /// `notice`, `warning`, or `alarm`: an alarm refuses the session.
+        severity: String,
+        /// Where the standard defines the event, as its group and number.
+        identifier: String,
+        /// What the backend said, possibly empty.
+        detail: String,
+    },
     /// A command was judged.
     Command {
         /// The address of the command.

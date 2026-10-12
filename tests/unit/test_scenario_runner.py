@@ -146,7 +146,12 @@ class FakeEngine:
         return None
 
     async def start(
-        self, bench: Any, run_id: str, evidence: Path, material: Any
+        self,
+        bench: Any,
+        run_id: str,
+        evidence: Path,
+        material: Any,
+        await_clients: bool,
     ) -> FakeHandle:
         if self.start_error is not None:
             raise self.start_error

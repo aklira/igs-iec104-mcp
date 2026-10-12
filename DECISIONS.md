@@ -932,3 +932,34 @@ test can show it.
   the client's TLS connection comes up, it interrogates the station, and reads 12.5; the bench is removed. The runtime
   tests (`tests/tls.rs`, 5 tests, including a station whose certificate comes with its intermediate, and a station that
   sends none and is refused) and the workspace tests pass; clippy, format, and `cargo deny` pass.
+
+## D-043: The TLS handshakes of a station are recorded, and a scenario expects a refusal (V1c)
+
+- Date: 2026-10-12 (task V1, third part: V1c).
+- Station events: the station's handshakes raise the security events of IEC 62351-3's Annex A, and the runtime records
+  each in the station's log as a `security` event: its mnemonic, its severity (`notice`, `warning`, or `alarm`), the
+  clause that defines it, and the backend's detail. The log exists before the station binds, so the handshakes record
+  into it. Contract 1.8.0 adds the kind to `station-events.schema.json`; the contract tests cover it.
+- Why: a refused handshake makes no `connected` and no `closed` event on the station (the upstream drops the
+  connection silently), so the security event is the station's only record of the refusal.
+- Client events: a client's handshake events are still discarded. A refused client records its reason as the text of
+  its `connect_failed` event.
+- Scenario step `expect_refusal` (`client`, `server`, `timeout`): it takes both cursors at its start, then passes when
+  the station records a security alarm after its cursor, or the client records `connect_failed` after its cursor. The
+  verdict names the event. It fails when the station records a `connected` event after its cursor: the refusal did not
+  happen. Only events after the cursor count, so an earlier refusal does not pass a later step.
+- Bench lifecycle: a scenario that has an `expect_refusal` step starts its bench without waiting for its clients to
+  connect, since a refused client is then the state the scenario checks. Every other scenario waits as before. The
+  engine's `start` takes that choice as `await_clients`.
+- Not in V1c: the client's own security events; a refusal that the client makes of the station, whose handshake alert
+  the station does not report as an Annex A event, so only the client's `connect_failed` shows it; the step's
+  `connected` check covers every client of the station, which is correct for the one-client benches of the tests and
+  should be narrowed when a station has several clients.
+- Tests: the runtime (`tests/tls.rs`, 6 tests): an accepted handshake leaves a `notice` on the station, and a station
+  that does not trust the client records `TLS_NO_CA_MATCH` as an alarm and accepts no connection; the contract tests
+  (the new kind matches the schema). Python: `tests/unit/test_scenario_refusal.py` (the step's checks and names; a
+  station alarm, a refused client, and an accepted connection; an event before the step does not pass it; the bench's
+  choice of waiting), and `tests/unit/test_contract_documents.py` (six station event kinds). Docker:
+  `tests/integration/test_docker_tls_scenarios.py` runs two scenarios through the run engine on Podman: the acceptance
+  passes with its three verdicts, and the rejection passes because its station records the alarm. Both benches are
+  removed.
