@@ -63,7 +63,15 @@ class FakeClient:
 
     async def events(self, after: int = 0) -> dict[str, Any]:
         kept = [event for event in self.kept if event["seq"] > after]
-        return {"events": kept, "last_seq": self.last}
+        return {
+            "events": kept,
+            "first_seq": 1 if self.kept else None,
+            "last_seq": self.last,
+            "dropped": 0,
+        }
+
+    async def station_events(self, after: int = 0) -> dict[str, Any]:
+        return {"events": [], "last_seq": 0, "dropped": 0}
 
     async def image_points(self) -> dict[str, Any]:
         return {

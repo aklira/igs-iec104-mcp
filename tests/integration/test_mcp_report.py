@@ -71,6 +71,7 @@ async def test_the_reports_of_a_docker_run_survive_the_removal_of_its_bench(
             "upstream": UPSTREAM_REVISION,
         }
         assert document["cleanup"]["bench_stopped"] is True
+        assert document["notes"] == [], "a healthy run drops no evidence"
         assert document["cleanup"]["bench"]["graceful"] is True
         assert "stop.json" in [e["name"] for e in document["manifest"]["evidence"]]
 

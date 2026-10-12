@@ -32,6 +32,7 @@ TOOLS = {
     "run_events",
     "run_cancel",
     "run_report",
+    "run_prune",
     "target_validate",
     "bench_recovered",
     "bench_recovered_remove",

@@ -565,6 +565,7 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 - **R2 — Reports** (JSON, JUnit XML, summary with the manifest of §10). Depends: R1, E2.
   Done (D-039): `run_report` makes the JSON, the JUnit XML, and the summary of an ended run from one document, and keeps each as an artifact of the run, so it outlives the bench.
 - **R3 — Limits and retention** (event buffers, storage bounds, retention policy). Depends: R1, D2.
+  Done (D-040): a step whose events were dropped by a runtime's log is an error, a drop count is a gap in the run and its report, and `run_prune` removes the ended runs a retention policy selects, never a run whose bench is still there.
 
 Each is done when its tests pass and its reports survive test bench cleanup.
 
@@ -626,7 +627,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | X3 Interoperability, independent implementation ⛔ | [ ] |
 | R1 Run store | [x] |
 | R2 Reports | [x] |
-| R3 Limits and retention | [ ] |
+| R3 Limits and retention | [x] |
 | V1 TLS scenarios | [ ] |
 | V2 Redundancy scenarios | [ ] |
 | V3 Controlled faults ⛔ | [ ] |

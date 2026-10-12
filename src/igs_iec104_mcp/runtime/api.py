@@ -50,6 +50,10 @@ class ControlClient:
     async def events(self, after: int = 0) -> dict[str, Any]:
         return await self._call("GET", "/v1/events", params={"after": after})
 
+    async def station_events(self, after: int = 0) -> dict[str, Any]:
+        """The events of a station after a sequence number, with the count dropped."""
+        return await self._call("GET", "/v1/station/events", params={"after": after})
+
     async def point(self, address: int) -> dict[str, Any]:
         return await self._call("GET", f"/v1/points/{address}")
 

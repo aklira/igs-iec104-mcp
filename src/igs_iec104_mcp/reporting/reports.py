@@ -47,7 +47,9 @@ CATEGORY: dict[Outcome, str] = {
     Outcome.INDETERMINATE: "indeterminate",
 }
 # The journal kinds that are notes on the run, rather than verdicts or confirmations.
-NOTE_KINDS: frozenset[str] = frozenset({"error", "interrupted", "cancel_requested"})
+NOTE_KINDS: frozenset[str] = frozenset(
+    {"error", "interrupted", "cancel_requested", "gap"}
+)
 
 
 class ReportOut(BaseModel):

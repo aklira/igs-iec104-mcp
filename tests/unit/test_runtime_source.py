@@ -9,6 +9,7 @@ import pytest
 
 from igs_iec104_mcp.runtime.source import (
     ControlSource,
+    EventGap,
     event_of,
     observation_of_image,
 )
@@ -54,11 +55,17 @@ class FakeClient:
         self.events_asked: list[int] = []
         self.events_kept: list[dict[str, Any]] = [POINT_EVENT]
         self.points: list[dict[str, Any]] = [POINT_IMAGE]
+        self.first_seq: int | None = 1
 
     async def events(self, after: int = 0) -> dict[str, Any]:
         self.events_asked.append(after)
         kept = [event for event in self.events_kept if event["seq"] > after]
-        return {"events": kept, "last_seq": POINT_EVENT["seq"]}
+        return {
+            "events": kept,
+            "first_seq": self.first_seq,
+            "last_seq": POINT_EVENT["seq"],
+            "dropped": 0,
+        }
 
     async def image_points(self) -> dict[str, Any]:
         return {"points": self.points}
@@ -102,6 +109,23 @@ async def test_the_source_asks_the_runtime_for_the_events_after_the_cursor() -> 
     assert [e.seq for e in await source.events_after("client-1", 3)] == [7]
     assert await source.events_after("client-1", 7) == []
     assert client.events_asked == [0, 3, 7]
+
+
+async def test_events_dropped_after_the_cursor_are_an_event_gap() -> None:
+    client = FakeClient()
+    client.first_seq = 6  # the oldest kept is 6: 4 and 5 were dropped after cursor 3
+    source = ControlSource({"client-1": client})
+    with pytest.raises(EventGap, match="dropped events after sequence 3"):
+        await source.events_after("client-1", 3)
+    client.first_seq = None  # the log kept nothing, though 7 was recorded
+    with pytest.raises(EventGap, match="the oldest kept is none"):
+        await source.events_after("client-1", 3)
+
+
+async def test_the_events_kept_from_the_cursor_on_are_not_a_gap() -> None:
+    source = ControlSource({"client-1": FakeClient()})
+    # The log starts at 1 and ends at 7: nothing after 6 is missing.
+    assert [e.seq for e in await source.events_after("client-1", 6)] == [7]
 
 
 async def test_the_source_finds_a_point_in_the_image_by_its_address() -> None:

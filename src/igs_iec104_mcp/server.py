@@ -27,6 +27,7 @@ from igs_iec104_mcp.scenarios.runner import (
     DockerEngine,
     EventsOut,
     NoEngine,
+    PruneOut,
     RecoveredPage,
     RemovedOut,
     Runner,
@@ -34,7 +35,8 @@ from igs_iec104_mcp.scenarios.runner import (
     RunsOut,
     run_out,
 )
-from igs_iec104_mcp.storage.runs import RunStore
+from igs_iec104_mcp.storage.retention import RetentionPolicy
+from igs_iec104_mcp.storage.runs import DEFAULT_MAX_EVENTS, RunStore
 
 NAME = "igs-iec104-mcp"
 INSTRUCTIONS = (
@@ -66,19 +68,22 @@ def create_server(
     *,
     runtime_image: str | None = None,
     relay_image: str | None = None,
+    retention: RetentionPolicy | None = None,
+    max_events: int = DEFAULT_MAX_EVENTS,
 ) -> MCPServer:
-    """The server over the project directory. Runs need both images; without them, a run
-    is refused with `engine_unavailable`. Raises StoreError when the directory does not
-    exist."""
+    """The server over the project directory. Runs need both images; without them, a
+    run is refused with `engine_unavailable`. The retention policy, when there is one,
+    is what `run_prune` removes by; `max_events` bounds each run's journal. Raises
+    StoreError when the directory does not exist."""
     store = ProjectStore(project)
-    runs = RunStore(project)
+    runs = RunStore(project, max_events=max_events)
     if runtime_image and relay_image:
         engine: DockerEngine | NoEngine = DockerEngine(
             image=runtime_image, relay=relay_image
         )
     else:
         engine = NoEngine()
-    runner = Runner(store, runs, engine)
+    runner = Runner(store, runs, engine, retention)
     interrupted = runner.reconcile()
     if interrupted:
         logging.getLogger(NAME).warning(
@@ -224,6 +229,16 @@ def create_server(
         return _call(lambda: runner.report(run_id, format=format))
 
     @server.tool(
+        name="run_prune",
+        description="Remove the ended runs the retention policy of the server selects: "
+        "all but the newest ones, and those that ended long ago. A run whose bench is "
+        "still on the engine is kept. With dry_run (the default), nothing is removed: "
+        "the result says what would be. Needs the server's retention options.",
+    )
+    async def run_prune(dry_run: bool = True) -> PruneOut:
+        return await _acall(lambda: runner.prune(dry_run=dry_run))
+
+    @server.tool(
         name="run_cancel",
         description="Ask a running run to stop. It ends cancelled once its steps have "
         "stopped and its cleanup has run.",
@@ -290,6 +305,22 @@ def main(argv: list[str] | None = None) -> int:
         "--relay-image",
         help="the relay image of the benches, by its identity (a digest, not a tag)",
     )
+    parser.add_argument(
+        "--keep-runs",
+        type=int,
+        help="keep the newest N ended runs; the older ones are removed by run_prune",
+    )
+    parser.add_argument(
+        "--keep-days",
+        type=float,
+        help="keep the runs that ended within N days; run_prune removes older ones",
+    )
+    parser.add_argument(
+        "--max-events",
+        type=int,
+        default=DEFAULT_MAX_EVENTS,
+        help="the events a run's journal keeps; the next ones are counted as dropped",
+    )
     arguments = parser.parse_args(argv)
     logging.basicConfig(
         stream=sys.stderr,
@@ -297,12 +328,19 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
     try:
+        retention = None
+        if arguments.keep_runs is not None or arguments.keep_days is not None:
+            retention = RetentionPolicy(
+                keep_runs=arguments.keep_runs, keep_days=arguments.keep_days
+            )
         server = create_server(
             arguments.project,
             runtime_image=arguments.runtime_image,
             relay_image=arguments.relay_image,
+            retention=retention,
+            max_events=arguments.max_events,
         )
-    except StoreError as error:
+    except (StoreError, ValueError) as error:
         print(f"{NAME}: {error}", file=sys.stderr)
         return 2
     server.run("stdio")

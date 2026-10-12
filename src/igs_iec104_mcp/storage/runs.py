@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -350,6 +351,19 @@ class RunStore:
             items=[_record(row[1:]) for row in page],
             next_cursor=page[-1][0] if more and page else None,
         )
+
+    def delete(self, run_id: str) -> None:
+        """Removes an ended run: its record, its artifact index, its journal, its
+        artifact files, and its evidence. A run that has not ended is refused."""
+        with self._lock:
+            run = self.get(run_id)
+            if run.status not in TERMINAL:
+                raise RunError(
+                    f"the run {run_id!r} is {run.status}: only an ended run is removed"
+                )
+            self._db.execute("DELETE FROM artifacts WHERE run_id = ?", (run_id,))
+            self._db.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            shutil.rmtree(self._contained(self.root / RUNS_DIRECTORY / run_id))
 
     def unended(self) -> list[RunRecord]:
         """Every run that has not ended, pending or running, in creation order."""

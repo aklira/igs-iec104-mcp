@@ -836,3 +836,36 @@ test can show it.
   (one test on Podman: a real MCP client runs the example, asks for the three formats once the bench is removed, finds
   the images and the upstream revision in the JSON, and reads the stored report back).
 - Journal layout: the `engine` event comes first, so the tests that list a journal's kinds now expect it.
+
+## D-040: Event buffers, storage bounds, and retention of the runs (R3)
+
+- Date: 2026-10-12 (task R3).
+- Event buffers: a runtime's event log is bounded by the instance's `event_buffer` (§6, already there). The controller
+  now reads the oldest sequence number the log kept (`first_seq`). A step that reads the events after its cursor, and
+  finds that events after it were dropped, raises `EventGap`: the step is an error (`infrastructure_error`), not a
+  failure, and not a pass by absence. The plan forbids a silent loss of assertion evidence (§7).
+- Drop counts at the end of a run: each runtime's drop count is read once the scenario has ended, before its bench is
+  stopped: the `dropped` of `/v1/events` for a client, and of `/v1/station/events` for a station (a new client method,
+  `station_events`). A non-zero count is a `gap` event in the journal, with the instance and the count. A count that
+  cannot be read (a runtime that is down) is a `gap` too, with no count, so the report never reads as complete when it is
+  not. The report lists gaps among its notes. A healthy run has none, and the integration test asserts it.
+- Storage bounds: the journal bound (`max_events`, 10 000 by default) and the artifact bound (16 MiB) are the store's.
+  The server takes `--max-events`. A journal that drops events says so in `journal.dropped` of each report.
+- Retention: a `RetentionPolicy` keeps the newest N ended runs (`--keep-runs`) and the runs that ended within D days
+  (`--keep-days`). With neither option, nothing is removed: the default keeps everything. The policy selects ended runs
+  only, oldest first. `run_prune` is explicit: `dry_run` is the default, and it says what would be removed. A run whose
+  bench is still on the engine is kept, so a recovered bench stays inspectable (D3). The prune needs the engine, since it
+  asks which benches are there; without images it is refused with `engine_unavailable`.
+- Removal: a run's record, its artifact index, its journal, its artifacts (its reports included), and its evidence are
+  removed together. A run that has not ended is refused. The bench of a run is not touched by a prune.
+- Not automatic: nothing is pruned at startup. The plan asks for explicit cleanup (§10), and a retention that removes
+  evidence should be run by a person.
+- Not in R3: a total size quota for the store; a prune of benches on their own; station-event overflow detection during a
+  step (assertions read the client events, so the step-level check covers them; a station gap is recorded at the end of a
+  run).
+- Tests: `tests/unit/test_retention.py` (11 tests: the policy's refusals and its selection by count and by age; a dry run
+  removes nothing; a prune removes the run with its journal and artifacts; a run whose bench is on the engine is kept; only
+  an ended run is deleted; drops and unreadable counts are gaps in the run and its report; a clean run has none; a usage
+  error for a policy that keeps nothing). `tests/unit/test_runtime_source.py` (two tests: a drop after the cursor is an
+  `EventGap`, and a log that kept the events after the cursor is not). `tests/integration/test_mcp_report.py` and
+  `test_mcp_run.py` pass on Podman, and a healthy run reports no gap.

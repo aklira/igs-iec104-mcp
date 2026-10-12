@@ -27,6 +27,12 @@ class ClientApi(Protocol):
     async def image_points(self) -> dict[str, Any]: ...
 
 
+class EventGap(Exception):
+    """The runtime's log dropped events after a cursor, so the reader cannot see all of
+    them. A step that waits for one cannot tell whether it came, so the step is an
+    error rather than a failure. The plan forbids a silent loss of evidence (§7)."""
+
+
 class ControlSource:
     """The events and the point images of the client runtimes, read through their
     control APIs.
@@ -50,6 +56,13 @@ class ControlSource:
 
     async def events_after(self, instance: str, cursor: int) -> list[Event]:
         body = await self._client(instance).events(after=cursor)
+        first = body.get("first_seq")
+        if int(body["last_seq"]) > cursor and (first is None or first > cursor + 1):
+            oldest = "none" if first is None else str(first)
+            raise EventGap(
+                f"{instance} dropped events after sequence {cursor}: the oldest "
+                f"kept is {oldest}; a larger event buffer keeps them"
+            )
         return [event_of(instance, recorded) for recorded in body["events"]]
 
     async def image(self, instance: str, address: int) -> Observation | None:

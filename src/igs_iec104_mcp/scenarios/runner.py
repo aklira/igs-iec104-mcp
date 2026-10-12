@@ -48,8 +48,10 @@ from igs_iec104_mcp.scenarios.actions import actions_for
 from igs_iec104_mcp.scenarios.assertions import ASSERTION_HANDLERS
 from igs_iec104_mcp.scenarios.confirmation import Confirmer, Gate
 from igs_iec104_mcp.scenarios.engine import Result, execute
+from igs_iec104_mcp.storage.retention import RetentionPolicy
 from igs_iec104_mcp.storage.runs import (
     EVIDENCE_DIRECTORY,
+    MAX_PAGE,
     RUNS_DIRECTORY,
     EventPage,
     InvalidTransition,
@@ -78,11 +80,13 @@ class EngineUnavailable(Exception):
 
 
 class Client(Protocol):
-    """The control API of a client runtime, as a run uses it."""
+    """The control API of a runtime, as a run uses it."""
 
     async def ready(self) -> dict[str, Any]: ...
 
     async def events(self, after: int = 0) -> dict[str, Any]: ...
+
+    async def station_events(self, after: int = 0) -> dict[str, Any]: ...
 
     async def image_points(self) -> dict[str, Any]: ...
 
@@ -291,6 +295,16 @@ class RemovedOut(BaseModel):
     removed: list[str]
 
 
+class PruneOut(BaseModel):
+    """What a prune removes, or would remove. A run whose bench is still on the
+    engine is kept, so that the bench stays inspectable."""
+
+    dry_run: bool
+    policy: str
+    removed: list[str]
+    kept_for_bench: list[str]
+
+
 class RunsOut(BaseModel):
     """A page of runs as a tool reports it."""
 
@@ -321,10 +335,17 @@ def run_out(record: RunRecord) -> RunOut:
 class Runner:
     """Starts, follows, and cancels the runs of one project."""
 
-    def __init__(self, store: ProjectStore, runs: RunStore, engine: Engine) -> None:
+    def __init__(
+        self,
+        store: ProjectStore,
+        runs: RunStore,
+        engine: Engine,
+        retention: RetentionPolicy | None = None,
+    ) -> None:
         self._store = store
         self._runs = runs
         self._engine = engine
+        self._retention = retention
         self._running: dict[str, _Running] = {}
 
     async def start(
@@ -423,6 +444,46 @@ class Runner:
     def get(self, run_id: str) -> RunRecord:
         with _failures():
             return self._runs.get(run_id)
+
+    async def prune(self, *, dry_run: bool = True) -> PruneOut:
+        """Removes the ended runs that the retention policy selects. A run whose bench
+        is still on the engine is kept. With `dry_run`, nothing is removed: the result
+        says what would be. Needs the engine, to know which benches are still there.
+
+        Raises ServiceError: `invalid_argument` when the server has no retention policy,
+        and `engine_unavailable` when the engine cannot be asked.
+        """
+        if self._retention is None:
+            raise ServiceError(
+                "invalid_argument",
+                "no retention policy is set: start the server with --keep-runs or "
+                "--keep-days",
+            )
+        benches = {owner.run for owner in await self._owners()}
+        selected = self._retention.select(self._all_runs(), _now_ms())
+        removed = [r.id for r in selected if r.id not in benches]
+        kept = [r.id for r in selected if r.id in benches]
+        if not dry_run:
+            with _failures():
+                for run_id in removed:
+                    self._runs.delete(run_id)
+        return PruneOut(
+            dry_run=dry_run,
+            policy=self._retention.describe(),
+            removed=removed,
+            kept_for_bench=kept,
+        )
+
+    def _all_runs(self) -> list[RunRecord]:
+        records: list[RunRecord] = []
+        cursor = 0
+        with _failures():
+            while True:
+                page = self._runs.list_runs(limit=MAX_PAGE, cursor=cursor)
+                records.extend(page.items)
+                if page.next_cursor is None:
+                    return records
+                cursor = page.next_cursor
 
     def report(self, run_id: str, *, format: str) -> ReportOut:
         """The report of an ended run in one format: json, junit, or summary."""
@@ -559,9 +620,48 @@ class Runner:
                 },
             )
 
-        return await execute(
+        result = await execute(
             scenario, handlers, source, cancel=cancel, observer=observe
         )
+        await self._record_drops(run_id, bench, managed)
+        return result
+
+    async def _record_drops(
+        self, run_id: str, bench: TestBench, managed: _ManagedBench
+    ) -> None:
+        """Notes each runtime whose log dropped events, and each whose count cannot be
+        read: the run may lack that evidence, and its report says so (§7, §10)."""
+        for instance in bench.instances:
+            control = managed.control(instance.name)
+            try:
+                if instance.role == "client":
+                    body = await control.events()
+                else:
+                    body = await control.station_events()
+                dropped = int(body.get("dropped", 0))
+            except Exception as error:
+                self._runs.record(
+                    run_id,
+                    "gap",
+                    {
+                        "instance": instance.name,
+                        "dropped": None,
+                        "detail": "the drop count could not be read: "
+                        f"{type(error).__name__}: {error}",
+                    },
+                )
+                continue
+            if dropped:
+                self._runs.record(
+                    run_id,
+                    "gap",
+                    {
+                        "instance": instance.name,
+                        "dropped": dropped,
+                        "detail": f"the runtime's log dropped {dropped} events: some "
+                        f"evidence of {instance.name} is missing",
+                    },
+                )
 
     async def _stop(self, run_id: str, handle: BenchHandle) -> bool:
         try:
