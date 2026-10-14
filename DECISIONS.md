@@ -1271,3 +1271,164 @@ test can show it.
   the tests check the exchange, not protocol conformance, and the results are not a certification.
 - Effect on V4: X3 no longer blocks it. The platform matrix is complete for Linux; V4 stays open until the Docker
   Desktop and WSL check has run on a machine that has Docker Desktop.
+
+## D-056: Agent-friendly installation, planned as Phase I (issue #1)
+
+- Date: 2026-10-14. The maintainer answered the questions raised on issue #1 (`aklira/igs-iec104-mcp#1`) and asked for the
+  issue to be split into tasks in `IMPLEMENTATION.md`.
+- Decision:
+  - Hosts: Linux and WSL2. The Docker Desktop check on WSL2 stays the open check of V4.
+  - Engines: Podman first, Docker second.
+  - Clients for v1: Claude Code and Codex. The `generic` mode is planned (I7) and not implemented in v1.
+  - The issue is Phase I of §14, with tasks I1 to I9, each planned to stay under about 400 lines. The phase is placed before
+    Phase V and is not a milestone of §13.
+  - The installer is bash (`scripts/install.sh`), because it runs before the Python environment exists. The preflight and the
+    MCP handshake are Python (`python -m igs_iec104_mcp.doctor`), so that they reuse the MCP client and produce the JSON.
+    The package keeps no console script (D-047).
+  - The installer never installs system packages, uses `sudo`, or changes group membership. It stops and names the corrective
+    step.
+  - Client registration uses each client's own command. Its write policy is a human gate (I6, Q-004).
+- Not decided here: the write policy of the client configuration (Q-004), and the exact arguments of the client CLIs, which
+  I6 verifies against the installed versions.
+- Effect: no code changed. Tasks I1 to I9 are unchecked in §16.
+
+## D-057: The preflight is read-only, and it runs apart from the server (I2)
+
+- Date: 2026-10-14 (task I2). Under D-056, the doctor is `python -m igs_iec104_mcp.doctor`, a module of the package, so
+  the server's options do not change.
+- Decision: the doctor checks the host (Linux or WSL2), Python 3.12, `uv`, Rust against the pin of
+  `runtime/rust-toolchain.toml`, the OpenSSL development files, a container engine, the `claude` and `codex` CLIs, and,
+  when `--project-dir` is given, that directory. Each check is OK, WARNING, or FAIL. Only FAIL makes the exit code 1.
+  The client CLIs and a Rust version other than the pin are WARNINGs: the client is needed only by I6, and rustup can
+  install the pin.
+- Engine: `DOCKER_HOST` wins when it is set. Otherwise the doctor tries the Podman socket under `XDG_RUNTIME_DIR`
+  (or `/run/user/<uid>`), then `/var/run/docker.sock`; `--engine` restricts the choice. A `DOCKER_HOST` that answers as
+  the other engine is a FAIL, not a fallback. A Podman service as root is a WARNING.
+- Read-only: the doctor installs nothing, changes no group, builds no image, and writes no file. The project directory is
+  checked, never created. Commands run without a shell, with a timeout, and only query state.
+- Why a probe: the checks read the machine through a small protocol, so the unit tests answer from a table and need no
+  engine. The engine is asked through the Docker SDK, which the package already depends on.
+- Verified: `tests/unit/test_doctor.py` (24 tests), and by hand on WSL2 with Podman 5.7.0 (the platform matrix row): the
+  doctor reports the engine at its socket, and refuses `--engine docker` against that socket.
+
+## D-058: The doctor runs the MCP handshake against a temporary project (I3)
+
+- Date: 2026-10-14 (task I3). The doctor starts the server the way a client does: over stdio, as a process of this
+  interpreter, with the source directory on its path. The server gets a temporary project, which is removed afterwards.
+- Decision: the checks are `server` (the handshake, with the server's name and version), `tools` (`bench_validate` must
+  be listed), and `bench-validate` (the tool is called on `examples/benches/basic-pair.yaml`, and the result must be
+  valid). A server that does not start, or does not answer within 60 seconds, is a FAIL that shows the server's last
+  stderr line and names the step to run it by hand.
+- `--server-only` runs only these checks, without the host checks, so that a machine or a CI job without an engine can
+  test the server. The default run includes both.
+- Why a temporary project: the bench is validated, never stored, and no run is written to the user's project. The
+  temporary directory is the only thing the doctor creates.
+- Module layout: the check types moved to `igs_iec104_mcp/checks.py`, which both the doctor and the handshake import.
+  That avoids an import cycle. The tests import the types from there, not from the doctor.
+- Verified: `tests/unit/test_handshake.py` (the parameters, the error descriptions, the validation result, and a command
+  that does not exist), `tests/integration/test_doctor_handshake.py` (the entry point against the real server, and a
+  wrong command path that exits 1 with its corrective step).
+
+## D-059: The installer builds the images with the engine's CLI and keeps its state outside the project (I4)
+
+- Date: 2026-10-14 (task I4). `scripts/install.sh` is bash, as D-056 decided: it runs `uv sync --locked`, then the
+  preflight (`uv run --locked python -m igs_iec104_mcp.doctor`), and stops at the first failed check.
+- Engine: the preflight names the engine it found (Podman first under `auto`), and the images are built with that engine's
+  CLI (`podman build`, or `docker build`). The tags `igs-iec104-runtime:local` and `igs-iec104-relay:local` are used only
+  to build and to read the identity, which the state keeps.
+- Identities: an engine reports an identity as `sha256:<hex>`, or, for Podman, as `<hex>` alone. The installer accepts both
+  and writes `sha256:<64 hex>`, the form the server's `IMAGE_PATTERN` accepts (`docker/specs.py`). A tag is never written.
+  Checked on this machine: the state's identities are the identities `podman image inspect` reports for both images.
+- State file: `$XDG_STATE_HOME/igs-iec104-mcp/install.json` (default `~/.local/state/...`), outside the project. The project
+  is versioned and the identities belong to one machine. It holds the engine, the repository and project paths (absolute),
+  and the two identities. It is rewritten only when its content changes, and the write is atomic.
+- Project directory: created with `mkdir -p` when missing; the default is `~/igs-project`, as `docs/setup.md`.
+- Rust and OpenSSL are required, as the preflight reports them, although the images build their own Rust code. The issue
+  lists both among the things the installer detects. A machine without them stops at the preflight, with the step to
+  take. Relaxing this is a separate decision.
+- Never: a system package, `sudo`, or a group change. The script only runs the commands above and writes the state file.
+- Verified: `tests/integration/test_install.py` (five tests: dry run, build and identity, the state unchanged on a second run,
+  an engine that is not the one asked for stopping before any build, and an unknown option), with a socket that answers as
+  Podman and an engine stub. Also run for real on WSL2 with Podman 5.7.0: both images built, the state written, and a
+  second run left it unchanged.
+
+## D-060: The doctor's bench run is opt-in, on a temporary project, and checks its own cleanup (I5)
+
+- Date: 2026-10-14 (task I5). `--run-bench` runs the example scenario (`interrogation-and-spontaneous-update`) on the
+  example bench (`basic-pair`) through the server's run tools, on the engine the preflight found. Without the flag nothing
+  starts, and the default run is unchanged.
+- Engine: the run's server gets `DOCKER_HOST` set to the host of the engine check, so the run uses the engine the preflight
+  found (Podman first under `auto`), not the default socket of the library.
+- Images: `--runtime-image` and `--relay-image`, by identity. Without them, the doctor reads the installer's state file
+  (D-059) and refuses an engine other than the one the images were built for. Each refusal names the installer step.
+- Project: the definitions and the records are in a temporary project. A passed run removes it. A run that does not pass
+  keeps it, and the check reports its path, so that the evidence can be read. The doctor then creates a file that outlives
+  the check, which the module docstring states: the handshake's project (D-058) is always removed.
+- Verdict: the run passes when it ends `passed` and every verdict passed. A timeout cancels the run, waits up to 120 s for
+  its cleanup, and reports the failure.
+- Cleanup: the doctor asks the engine, through the package's own adapter, whether any resource owned by the run's bench
+  is left (owner: project `igs-mcp`, bench `basic-pair`, run identifier). A resource left is a FAIL with the step to remove
+  it (`bench_recovered`, `bench_recovered_remove`). The doctor never removes resources itself.
+- `--run-bench` cannot be combined with `--server-only`: the bench needs the engine check.
+- Verified: `tests/integration/test_doctor_bench.py` on Podman 5.7.0 (three tests: the example run with 6 of 6 verdicts and
+  no leftover, a run with a wrong value that ends `failed` and keeps its evidence, and the entry point with the flag). A
+  real run of the doctor by hand gave the same result, and no container, network, or temporary project was left.
+
+## D-061: The client registration: user scope, no silent overwrite, confirmation (I6, Q-004)
+
+- Date: 2026-10-14. The maintainer validated the recommendations for Q-004, made after testing both CLIs in temporary
+  configuration homes (`HOME` and `CODEX_HOME`).
+- Scope: Claude Code is registered in the user scope, with `--scope user` given explicitly. Codex has only the global
+  scope. The installer never writes into a repository: no `project` scope (which writes `.mcp.json` into the working
+  directory), and no reliance on `local`, the default of Claude.
+- Detection before writing: `claude mcp get <name>` exits 0 when the entry exists and 1 when it does not. Its output is
+  read for the command, the arguments, and the environment. `codex mcp get <name> --json` exits 1 when the entry does not
+  exist, and its JSON gives the transport. Both CLIs print environment values in clear, so the installer never prints
+  their output. It prints the names of the fields that differ, never their values.
+- Existing entry: when it matches the one the installer would write, nothing changes. When it differs, nothing changes
+  unless `--force` is given. Claude refuses a duplicate name, and Codex overwrites silently, so the installer does not
+  rely on either behaviour.
+- Confirmation: the installer prints the exact commands and asks before it runs them. `--yes` skips the question for a new
+  registration only. Without a terminal and without `--yes`, it stops and says so. `--force` is needed to replace an
+  entry, even with `--yes`.
+- Registration: the name is `igs-iec104`. The command is the venv's Python, with `-m igs_iec104_mcp`, the project directory,
+  the two images by identity, and the environment `PYTHONPATH` (the source directory) and `DOCKER_HOST` (the engine the
+  preflight found). The client's CLI is used for every change; the installer never edits a client's configuration file.
+- Verified: unit tests with a table of command answers, and integration tests with stub client CLIs whose behaviour
+  matches the real ones (a duplicate is refused by Claude and overwritten by Codex, exit 0 in both cases).
+
+## D-062: The preflight checks the installation's images, and a missing image is a warning (issue #1, finishing)
+
+- Date: 2026-10-14. The issue asks the doctor to check the image identities (point 3). The check reads the installation's
+  images from the state file of the installer, or from `--runtime-image` and `--relay-image`, and asks the engine for each.
+- Decision: the check is `images`. It is OK when both identities are on the engine. It is a WARNING when one is missing,
+  when no installation is known for this engine, or when the engine does not answer about the images. It is never a FAIL:
+  the installer runs the preflight before it builds the images, and a FAIL would stop the first installation.
+- Why a warning and not a skip: a warning says what is missing and names `scripts/install.sh` as the step to take, and
+  the report keeps it visible.
+- Verified: unit tests for each case (`tests/unit/test_doctor.py`), and by hand on Podman 5.7.0 with the installer's state
+  (`ok`) and with an absent identity (`warn`, the installer's step, exit 0).
+
+## D-063: A real Codex session needs the approval of the server's tools configured by a person (issue #1, finishing)
+
+- Date: 2026-10-14. A real Codex session (CLI 0.147.0) connected to the server, and `bench_validate` returned `valid: true`
+  once the approval of this server's tools was set for that invocation (`default_tools_approval_mode`). Without it, Codex
+  cancels each tool call of an MCP server in a non-interactive run.
+- Decision: the installer does not set that approval. An interactive session asks the person, and a session without a
+  person needs the approval set by a person. The install guide says so (step 7), and the platform matrix records the
+  session.
+
+## D-064: The generic mode prints the entry, and writes and runs nothing (I7)
+
+- Date: 2026-10-14 (task I7). The maintainer asked for the generic mode.
+- Decision: `--client generic` prints the server's entry, the command, the arguments, and the environment, with the JSON
+  form under `mcpServers`. It writes no file, starts no client CLI, and asks for no confirmation. The values are paths,
+  images by identity, and the socket: no secret. The keys of the JSON are the common ones; the text tells the person to
+  adjust them for a client that names them differently. The installer treats the mode like the others, with step 8 of the
+  dry run and the same registration call.
+- Why not per-client formats: the formats of the other clients were not verified, and a wrong format would look like a
+  working registration. The entry is checked instead: the integration test reads the printed JSON back, as a client reads
+  it, and runs the handshake of the preflight against the printed command.
+- Verified: `tests/unit/test_registration.py` (entry, text, and no client run), `tests/integration/test_generic_client.py`
+  (the printed command starts the server), `tests/integration/test_install.py` (the installer prints the entry and writes no
+  client file).

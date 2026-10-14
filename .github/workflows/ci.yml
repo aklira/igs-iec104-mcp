@@ -134,3 +134,79 @@ jobs:
         env:
           IGS_RUNTIME_BINARY: ${{ github.workspace }}/runtime/target/debug/igs-iec104-runtime
         run: uv run pytest tests/integration
+
+  install:
+    # The installer as an agent runs it (docs/install-agent.md), on a runner that holds nothing
+    # from an earlier run: no action cache, no image, and no state. Docker is the runner's
+    # engine. Podman is tested on the maintainer's WSL2 host (docs/platform-matrix.md).
+    name: Installation on a fresh checkout (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set the paths of this run, outside the checkout
+        run: |
+          echo "XDG_STATE_HOME=$RUNNER_TEMP/state" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$RUNNER_TEMP/igs-project" >> "$GITHUB_ENV"
+
+      - name: Install the OpenSSL development files
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
+
+      - name: Install uv and Python (from .python-version), without a cache
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: false
+
+      - name: The plan changes nothing
+        run: |
+          scripts/install.sh --dry-run --engine docker --project-dir "$PROJECT_DIR" --client claude
+          test ! -e "$PROJECT_DIR"
+          test ! -e "$XDG_STATE_HOME/igs-iec104-mcp/install.json"
+
+      - name: Install the server
+        run: |
+          set -o pipefail
+          scripts/install.sh --engine docker --project-dir "$PROJECT_DIR" | tee first.txt
+
+      - name: Install again, and nothing changes
+        run: |
+          set -o pipefail
+          state="$XDG_STATE_HOME/igs-iec104-mcp/install.json"
+          before=$(sha256sum "$state")
+          scripts/install.sh --engine docker --project-dir "$PROJECT_DIR" | tee second.txt
+          grep -q "state unchanged" second.txt
+          test "$before" = "$(sha256sum "$state")"
+
+      - name: The state holds identities and absolute paths, never tags
+        run: |
+          python3 -c '
+          import json, os, re
+          state = json.load(open(os.path.join(os.environ["XDG_STATE_HOME"], "igs-iec104-mcp", "install.json")))
+          assert state["engine"] == "docker", state
+          for key in ("runtime_image", "relay_image"):
+              assert re.fullmatch(r"sha256:[0-9a-f]{64}", state[key]), state
+          assert os.path.isabs(state["repository"]) and os.path.isabs(state["project_dir"]), state
+          print(state)
+          '
+
+      - name: The server answers its handshake, and validates the example bench
+        run: PYTHONPATH=src uv run --locked python -m igs_iec104_mcp.doctor --server-only
+
+      - name: Run the example bench, and find nothing left on the engine
+        run: |
+          set -o pipefail
+          PYTHONPATH=src uv run --locked python -m igs_iec104_mcp.doctor --engine docker --run-bench --json | tee bench.json
+          python3 -c '
+          import json
+          statuses = {check["name"]: check["status"] for check in json.load(open("bench.json"))["checks"]}
+          assert statuses["bench-run"] == "ok", statuses
+          assert statuses["bench-cleanup"] == "ok", statuses
+          '
+          test -z "$(docker ps -aq --filter label=dev.igs-iec104.mcp.managed=true)"
+          test -z "$(docker network ls -q --filter label=dev.igs-iec104.mcp.managed=true)"
+
+      - name: The registration tests (stub client CLIs)
+        run: uv run pytest tests/integration/test_install.py -k registration -v

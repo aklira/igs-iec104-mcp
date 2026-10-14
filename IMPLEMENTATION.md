@@ -571,6 +571,89 @@ Planned, reviewed and done in the `igs-iec104` repository, with its own tasks an
 
 Each is done when its tests pass and its reports survive test bench cleanup.
 
+### Phase I — Agent-friendly installation (issue #1)
+
+This phase answers issue #1 (`aklira/igs-iec104-mcp#1`), as decided in D-056: the hosts are Linux and WSL2, Podman is the
+first engine and Docker the second, and the v1 clients are Claude Code and Codex. The generic client mode is planned, not
+in v1. The phase is not a milestone of §13. It runs before Phase V, so that V4 and V5 cover it.
+
+The installer is bash (`scripts/install.sh`), because it runs before the Python environment exists. The preflight and the
+MCP handshake are Python (`igs_iec104_mcp.doctor`), because they reuse the MCP client and produce the JSON status. Neither
+installs system packages, uses `sudo`, or changes group membership: each stops and names the corrective step.
+
+**I1 — Consistent status statements**
+- Depends: none.
+- Produce: one status for each feature in `README.md`, `docs/platform-matrix.md`, and `docs/setup.md`. Today the
+  controlled-fault and interoperability statements conflict.
+- Done when: the three documents state the same status for every feature, and each status matches the code and DECISIONS.md.
+
+**I2 — Read-only preflight**
+- Depends: I1.
+- Produce: `igs_iec104_mcp/doctor.py`, run as `python -m igs_iec104_mcp.doctor` (a separate entry point, so the server's
+  options do not change). It checks, without changing the system: uv and the locked environment, the Rust toolchain, the
+  OpenSSL development files, Podman (rootless) and Docker with their sockets, the WSL2 host, the client CLIs (`claude`,
+  `codex`), and the permissions of the project directory. Each failed check names its corrective step. It prints a table,
+  or JSON with `--json`, and exits nonzero on a failure.
+- Done when: unit tests with a fake command runner cover the pass, the failure, and the message of each check; no check runs
+  a privileged or state-changing command.
+
+**I3 — MCP handshake and bench validation**
+- Depends: I2, M1.
+- Produce: the doctor starts the server with the stdio command a client would use, performs the MCP handshake, lists the
+  tools, and calls `bench_validate` on `examples/benches/basic-pair.yaml`. Its JSON status gives the result of each check.
+- Done when: an integration test runs the doctor on the built package and gets exit 0; with a wrong command path, it exits
+  nonzero and names the corrective step.
+
+**I4 — Installer: build and image identities**
+- Depends: I2, B2.
+- Produce: `scripts/install.sh --engine auto|podman|docker [--dry-run] [--project-dir PATH]`. It runs the doctor's checks,
+  runs `uv sync --locked`, builds the runtime and relay images with the engine, reads the ID of each image (`sha256:…`) with
+  `inspect`, creates the project directory, and writes a state file holding absolute paths and image IDs. It never writes
+  image tags or secrets.
+- Done when: `--dry-run` changes nothing; a second run changes nothing; the state file holds IDs and absolute paths; the
+  tests run the script with a stub engine and a stub `uv` on `PATH`.
+
+**I5 — Opt-in bench run in the doctor**
+- Depends: I3, M2, D2.
+- Produce: `--run-bench` runs the example scenario on a managed bench through the run tools, on Podman first and Docker
+  second, with the default cleanup policy, and reports the run and its verdict. Without the flag, nothing is started. The
+  scenario uses managed instances only; an external target is refused.
+- Done when: the integration test passes on Podman locally; the report gives the run identifier and the verdict; a run that
+  fails still removes the bench it created.
+
+**I6 — Client registration** ⛔
+- Depends: I3, I4.
+- Produce: `--client claude|codex` registers the server with the client's own command (`claude mcp add`, `codex mcp add`),
+  with the absolute command and the project directory. The installer shows the exact command before it runs it, and asks for
+  confirmation unless `--yes` is given. A registration that already matches changes nothing. One that differs is reported and
+  kept unless `--force` is given. A missing client CLI is reported, not installed.
+- Gate: a maintainer approves the write policy (scope `user` or `project`, the overwrite rules, and what `--yes` allows).
+  The answer is recorded in DECISIONS.md, and Q-004 is closed.
+- Done when: the maintainer has approved the policy, and tests with stub client CLIs cover a fresh registration, a repeated
+  one, and a differing one.
+
+**I7 — Generic client mode**
+- Depends: I6.
+- Produce: `--client generic` prints the stdio configuration (command, arguments, working directory) for any MCP client and
+  writes no client file. Implemented (D-064): it prints the entry and writes nothing.
+- Done when: the printed configuration matches the launch command of I3, checked by a test.
+
+**I8 — Agent installation guide**
+- Depends: I3, I6.
+- Produce: `docs/install-agent.md`, the single entry point for an agent: the supported hosts, the prerequisites, the steps
+  with their expected outputs, the stop and approval conditions (privileged prerequisites, client writes, the opt-in bench
+  run), and links to the troubleshooting page. It separates "server connected and tools discoverable" from "bench
+  operational" (I5). It is linked from `README.md` and `docs/setup.md`.
+- Done when: a reviewer follows it on a clean clone on Linux without a step outside the document, and the review is recorded
+  in its ai-log.
+
+**I9 — CI fresh-checkout installation**
+- Depends: I5, I6, I8.
+- Produce: a CI job on a fresh checkout that runs the installer twice (the second run changes nothing), the doctor with
+  `--run-bench`, and the registration tests. It uses no image, cache, or configuration left by another run.
+- Done when: the job passes on the main branch and on a pull request. The WSL2 check is not in CI: a maintainer runs it and
+  records the result in `docs/platform-matrix.md` as part of V4.
+
 ### Phase V — Validation release (milestone 8)
 
 - **V1 — TLS scenarios.** Depends: C2, C3, D2. Both roles with the upstream TLS settings; acceptance and rejection cases.
@@ -634,6 +717,15 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | R1 Run store | [x] |
 | R2 Reports | [x] |
 | R3 Limits and retention | [x] |
+| I1 Consistent status statements (issue #1) | [x] |
+| I2 Read-only preflight (issue #1) | [x] |
+| I3 MCP handshake and bench validation (issue #1) | [x] |
+| I4 Installer: build and image identities (issue #1) | [x] |
+| I5 Opt-in bench run in the doctor (issue #1) | [x] |
+| I6 Client registration, Claude Code and Codex (issue #1) ⛔ | [x] |
+| I7 Generic client mode (issue #1) | [x] |
+| I8 Agent installation guide (issue #1) | [x] |
+| I9 CI fresh-checkout installation (issue #1) | [ ] |
 | V1 TLS scenarios | [x] |
 | V2 Redundancy scenarios | [x] |
 | V3 Controlled faults ⛔ | [x] |
