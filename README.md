@@ -13,6 +13,7 @@ in a container image. The protocol work is done by the upstream library, pinned 
 | Document | What it covers |
 | --- | --- |
 | [Setup](docs/setup.md) | Prerequisites, building the images, starting the server, connecting an MCP client |
+| [Install with a coding agent](docs/install-agent.md) | The entry point for an agent: the steps, the output to expect, and when to ask a person |
 | [Definitions](docs/definitions.md) | The bench and scenario YAML, the actions, the schemas |
 | [Docker benches](docs/docker.md) | Networks, connectivity, published stations, redundancy groups, recovery |
 | [Tools](docs/tools.md) | The MCP tools, their error codes, the run states and verdict outcomes |

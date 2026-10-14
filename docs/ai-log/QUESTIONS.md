@@ -39,3 +39,11 @@
   plan time, naming the parameters (`docker/plan.py`). The defaults of the model equal the upstream defaults
   (`igs-iec104-link`, `Parameters::default`).
 
+## Q-004: write policy of the client registration
+
+- Task: I6. Status: resolved by D-061 (the maintainer validated the recommendations on 2026-10-14).
+- Question: should `scripts/install.sh --client` register the server in the user scope or in the project scope? When a
+  different registration already exists, should it keep it, replace it with `--force`, or refuse? Should `--yes` write without
+  showing the exact command first?
+- Effect until decided: I6 does not start. I1 to I5 do not depend on it, and I7 to I9 wait for I6.
+

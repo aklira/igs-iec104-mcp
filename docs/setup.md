@@ -3,6 +3,9 @@
 This page takes a machine from nothing to a running MCP server with its images built. Commands are shown for
 Linux; on Windows, run them inside WSL2 with a Linux engine.
 
+A coding agent that installs the server should follow [installing with a coding agent](install-agent.md), which
+gives the same steps in the order an agent runs them, with the points where it stops to ask a person.
+
 ## Prerequisites
 
 | Tool | Version | Used for |

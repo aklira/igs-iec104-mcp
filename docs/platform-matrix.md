@@ -36,7 +36,8 @@ Desktop, with the same test suite, before a release.
 | --- | --- | --- |
 | Client: STARTDT, STOPDT, the transfer state | supported and tested | `start_transfer`, `wait_transfer_started` |
 | Client: general interrogation | supported and tested | `general_interrogation`; the termination ends the step |
-| Client: reads, counter interrogation, clock sync, test command | supported by the runtime; not in scenario actions | the scenario layer does not drive them yet |
+| Client: counter interrogation | supported by the runtime (`POST /v1/interrogation/counter`); not a scenario action | the scenario layer does not drive it yet |
+| Client: reads, clock sync, test command | not exposed by the runtime's control API | no route in the runtime's control API |
 | Client: point image and spontaneous updates | supported and tested | `assert_point`, `expect_point`, cause checks |
 | Station: points and their kinds | supported and tested | the kinds of the upstream `PointValue` |
 | Station: simulation (`toggle`, `ramp`, `walk`) | supported | a seeded change at each period |
@@ -58,8 +59,8 @@ Desktop, with the same test suite, before a release.
 | Run records, reports, retention | supported and tested | JSON, JUnit XML, Markdown |
 | Recovery after a server crash | supported | the run is `interrupted`; its bench is listed and removed by its run |
 | Streamable HTTP transport | supported on the loopback, with a token | `--transport http`; no remote listener and no TLS yet (see [setup](setup.md#http-transport)) |
-| Controlled faults (interruption, latency) | **not implemented** | waits for a maintainer's approval of the component (V3) |
-| Interoperability with an independent implementation (OpenMUC j60870 1.8.0, black box) | supported in both directions on the bench network, tested | `tests/integration/test_interop_j60870.py` (our client, their station) and `test_interop_j60870_client.py` (their client, our station); an external client outside Docker is open (D-053) |
+| Controlled faults (interruption, latency) | supported on Docker and tested | the interrupt and latency scenarios of V3c (D-051); a stop of the proxy's own container is not tested |
+| Interoperability with an independent implementation (OpenMUC j60870 1.8.0, black box) | supported in both directions on the bench network, tested | `tests/integration/test_interop_j60870.py` (our client, their station) and `test_interop_j60870_client.py` (their client, our station); a client outside Docker is not yet tested against the peer (D-055) |
 
 ### What the runtime does not handle
 
@@ -91,8 +92,8 @@ generic path, which the scenarios do not use.
 The release is gated on these items, in this order:
 
 1. The Docker Desktop checks above, on a machine with Docker Desktop.
-2. The remaining tasks of the plan: X3 (interoperability), and V3 (controlled faults). Each
-   needs a maintainer's decision first.
+2. The remaining tasks of the plan: Phase I (the agent-friendly installation, issue #1), and V5, the release
+   decision of a maintainer. X3 (interoperability, D-055) and V3 (controlled faults, D-051) are done.
 3. A review of this matrix and of the limitations by a maintainer, and of the licences (`scripts/check_licences.py`
    and `cargo deny`).
 
