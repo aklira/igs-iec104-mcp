@@ -725,7 +725,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | I6 Client registration, Claude Code and Codex (issue #1) ⛔ | [x] |
 | I7 Generic client mode (issue #1) | [x] |
 | I8 Agent installation guide (issue #1) | [x] |
-| I9 CI fresh-checkout installation (issue #1) | [ ] |
+| I9 CI fresh-checkout installation (issue #1) | [x] |
 | V1 TLS scenarios | [x] |
 | V2 Redundancy scenarios | [x] |
 | V3 Controlled faults ⛔ | [x] |
