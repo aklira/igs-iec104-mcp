@@ -7,7 +7,7 @@
 # the preflight names the corrective step (D-056).
 #
 # Usage: scripts/install.sh [--engine auto|podman|docker] [--project-dir PATH] [--dry-run]
-#                          [--client claude|codex [--force] [--yes]]
+#                          [--client claude|codex|generic [--force] [--yes]]
 set -euo pipefail
 
 RUNTIME_TAG=igs-iec104-runtime:local
@@ -16,12 +16,13 @@ RELAY_TAG=igs-iec104-relay:local
 usage() {
     cat <<'EOF'
 usage: scripts/install.sh [--engine auto|podman|docker] [--project-dir PATH] [--dry-run]
-                         [--client claude|codex [--force] [--yes]]
+                         [--client claude|codex|generic [--force] [--yes]]
 
   --engine      the container engine: auto (Podman first, then Docker), podman, or docker
   --project-dir the project directory of the definitions (default: ~/igs-project)
   --dry-run     print the steps and change nothing; the preflight runs on a real run only
-  --client      register the server with this MCP client, under the name igs-iec104
+  --client      register the server with this MCP client, under the name igs-iec104;
+                generic prints the entry for any other client, and writes nothing
   --force       replace a registration that differs from the one the installer writes
   --yes         do not ask before a new registration is added
 EOF
@@ -81,9 +82,8 @@ case "$engine" in
     *) die "--engine must be auto, podman, or docker" 2 ;;
 esac
 case "$client" in
-    '' | claude | codex) ;;
-    generic) die "--client generic is not implemented yet (planned after v1, D-056)" 2 ;;
-    *) die "--client must be claude or codex" 2 ;;
+    '' | claude | codex | generic) ;;
+    *) die "--client must be claude, codex, or generic" 2 ;;
 esac
 
 REPO=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -108,7 +108,7 @@ dry run: nothing is changed. A real run would:
   7. write the state file $STATE, if its content changes
 EOF
     if [ -n "$client" ]; then
-        echo "  8. register the server with $client: the commands are shown first; --force and --yes apply"
+        echo "  8. register the server with $client: claude and codex show their commands first, and generic prints the entry and writes nothing"
     fi
     exit 0
 fi
@@ -194,7 +194,9 @@ fi
 echo "installed: runtime $runtime_image"
 echo "           relay   $relay_image"
 echo "           project $project_dir"
-if [ -n "$client" ]; then
+if [ "$client" = generic ]; then
+    echo "next: copy the entry printed above into your client's configuration, then start a new session"
+elif [ -n "$client" ]; then
     echo "next: start a new $client session, and check the server (docs/setup.md#connect-an-mcp-client)"
 else
     echo "next: register the server with your MCP client (docs/setup.md#connect-an-mcp-client)"

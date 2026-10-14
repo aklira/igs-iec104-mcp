@@ -6,12 +6,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from igs_iec104_mcp.registration import (
     NAME,
     Output,
     Spec,
     add_command,
     desired_spec,
+    generic_entry,
+    generic_text,
+    main,
     register,
     remove_command,
 )
@@ -245,3 +250,49 @@ def test_a_failed_add_is_reported_with_its_output() -> None:
     )
     assert code == 1
     assert any("codex refused the server" in line for line in lines)
+
+
+def test_the_generic_entry_has_the_command_the_arguments_and_the_env() -> None:
+    assert generic_entry(SPEC) == {
+        "command": "/repo/.venv/bin/python",
+        "args": list(SPEC.args),
+        "env": {
+            "PYTHONPATH": "/repo/src",
+            "DOCKER_HOST": "unix:///run/user/1000/podman/podman.sock",
+        },
+    }
+
+
+def test_the_generic_text_carries_the_json_form() -> None:
+    text = generic_text(SPEC)
+    payload = json.loads(text[text.index("{") :])
+    assert payload == {"mcpServers": {NAME: generic_entry(SPEC)}}
+    assert "nothing was written" in text
+
+
+def test_the_generic_mode_prints_and_never_runs_a_client(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def no_client(argv: Any) -> Output:
+        raise AssertionError(f"the generic mode ran {argv}")
+
+    code = main(
+        [
+            "--client",
+            "generic",
+            "--repository",
+            "/repo",
+            "--project-dir",
+            "/proj",
+            "--runtime-image",
+            "sha256:aa",
+            "--relay-image",
+            "sha256:bb",
+            "--docker-host",
+            "unix:///run/user/1000/podman/podman.sock",
+        ],
+        run=no_client,
+        which=lambda name: None,
+    )
+    assert code == 0
+    assert '"mcpServers"' in capsys.readouterr().out

@@ -31,8 +31,10 @@ Level 1 needs no container. Level 2 starts containers, so it needs the person's 
 
 Use [the platform matrix](platform-matrix.md) for the versions behind each row.
 
-Client support in v1: Claude Code and Codex. Other clients are configured by hand, as [setup](setup.md#other-clients)
-describes. `--client generic` is planned and not implemented; the installer refuses it with exit code 2.
+The installer registers the server with Claude Code and Codex (`--client claude` or `--client codex`). For any other
+client, `--client generic` prints the server's entry in the common `mcpServers` form, and writes nothing: add it to the
+client's configuration yourself, as [setup](setup.md#other-clients) describes. Some clients name the keys differently,
+so adjust them to the client's format.
 
 ## Prerequisites
 
@@ -214,6 +216,6 @@ The installation contacts no external IEC 104 target. Nothing in it commits or p
 | `is registered differently` | Show the person the differing fields. Replace the entry only with approval (step 4). |
 | `the server did not complete the handshake` | Run the server by hand, as the output says, and read its error. |
 | `bench-cleanup` fails | List what is left with `bench_recovered`, then remove it with `bench_recovered_remove`, after approval. |
-| `--client generic is not implemented yet` | Register the server by hand: [setup](setup.md#connect-an-mcp-client). |
+| `--client must be claude, codex, or generic` | Use one of the three names. |
 
 For the server itself, see [troubleshooting](troubleshooting.md).

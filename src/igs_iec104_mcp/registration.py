@@ -4,7 +4,8 @@ issue #1; D-061).
 `scripts/install.sh --client claude|codex` calls this module once the images are built.
 It registers the server under one name, with the client's own command: the user scope
 for Claude Code (`--scope user`), and the global configuration for Codex. It never edits
-a client's configuration file. It reads the entry that exists first, and writes only
+a client's configuration file. The `generic` mode prints the entry for any other client,
+and writes nothing (I7). It reads the entry that exists first, and writes only
 when the entry is missing, or when it is different and `--force` is given. It shows the
 exact commands and asks before it runs them, unless `--yes` is given.
 
@@ -22,9 +23,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 NAME = "igs-iec104"
 CLIENTS = ("claude", "codex")
+GENERIC = "generic"
 TIMEOUT = 60.0
 
 
@@ -86,6 +89,31 @@ def desired_spec(
         relay_image,
     )
     return Spec(NAME, str(repository / ".venv" / "bin" / "python"), args, environment)
+
+
+def generic_entry(spec: Spec) -> dict[str, Any]:
+    """The entry of the server as an MCP stdio server, in the common keys."""
+    return {"command": spec.command, "args": list(spec.args), "env": dict(spec.env)}
+
+
+def generic_text(spec: Spec) -> str:
+    """What the generic mode prints: the entry, and the JSON form of it. The values are
+    paths and a socket, not secrets."""
+    config = {"mcpServers": {spec.name: generic_entry(spec)}}
+    environment = ", ".join(f"{key}={value}" for key, value in spec.env.items())
+    return "\n".join(
+        [
+            "generic: the server as an MCP stdio server; nothing was written",
+            f"  name:    {spec.name}",
+            f"  command: {spec.command}",
+            f"  args:    {shlex.join(spec.args)}",
+            f"  env:     {environment}",
+            "",
+            "Add this entry to your client's configuration. Some clients name the",
+            "keys differently: adjust them to the client's format.",
+            json.dumps(config, indent=2),
+        ]
+    )
 
 
 def _env_flags(flag: str, env: Mapping[str, str]) -> list[str]:
@@ -266,7 +294,7 @@ def main(
         prog="python -m igs_iec104_mcp.registration",
         description="Registers the server with an MCP client, after confirmation.",
     )
-    parser.add_argument("--client", choices=CLIENTS, required=True)
+    parser.add_argument("--client", choices=(*CLIENTS, GENERIC), required=True)
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--project-dir", type=Path, required=True)
     parser.add_argument("--runtime-image", required=True)
@@ -286,6 +314,9 @@ def main(
         args.relay_image,
         args.docker_host,
     )
+    if args.client == GENERIC:
+        print(generic_text(spec))
+        return 0
     if ask is None and sys.stdin.isatty():
         ask = input
     return register(

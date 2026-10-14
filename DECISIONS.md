@@ -1417,3 +1417,18 @@ test can show it.
 - Decision: the installer does not set that approval. An interactive session asks the person, and a session without a
   person needs the approval set by a person. The install guide says so (step 7), and the platform matrix records the
   session.
+
+## D-064: The generic mode prints the entry, and writes and runs nothing (I7)
+
+- Date: 2026-10-14 (task I7). The maintainer asked for the generic mode.
+- Decision: `--client generic` prints the server's entry, the command, the arguments, and the environment, with the JSON
+  form under `mcpServers`. It writes no file, starts no client CLI, and asks for no confirmation. The values are paths,
+  images by identity, and the socket: no secret. The keys of the JSON are the common ones; the text tells the person to
+  adjust them for a client that names them differently. The installer treats the mode like the others, with step 8 of the
+  dry run and the same registration call.
+- Why not per-client formats: the formats of the other clients were not verified, and a wrong format would look like a
+  working registration. The entry is checked instead: the integration test reads the printed JSON back, as a client reads
+  it, and runs the handshake of the preflight against the printed command.
+- Verified: `tests/unit/test_registration.py` (entry, text, and no client run), `tests/integration/test_generic_client.py`
+  (the printed command starts the server), `tests/integration/test_install.py` (the installer prints the entry and writes no
+  client file).

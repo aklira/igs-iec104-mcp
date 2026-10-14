@@ -632,10 +632,10 @@ installs system packages, uses `sudo`, or changes group membership: each stops a
 - Done when: the maintainer has approved the policy, and tests with stub client CLIs cover a fresh registration, a repeated
   one, and a differing one.
 
-**I7 — Generic client mode (not in v1)**
+**I7 — Generic client mode**
 - Depends: I6.
 - Produce: `--client generic` prints the stdio configuration (command, arguments, working directory) for any MCP client and
-  writes no client file. Not implemented; planned after v1 (D-056).
+  writes no client file. Implemented (D-064): it prints the entry and writes nothing.
 - Done when: the printed configuration matches the launch command of I3, checked by a test.
 
 **I8 — Agent installation guide**
@@ -723,7 +723,7 @@ Release documentation must include setup, Docker connectivity, external endpoint
 | I4 Installer: build and image identities (issue #1) | [x] |
 | I5 Opt-in bench run in the doctor (issue #1) | [x] |
 | I6 Client registration, Claude Code and Codex (issue #1) ⛔ | [x] |
-| I7 Generic client mode, not in v1 (issue #1) | [ ] |
+| I7 Generic client mode (issue #1) | [x] |
 | I8 Agent installation guide (issue #1) | [x] |
 | I9 CI fresh-checkout installation (issue #1) | [ ] |
 | V1 TLS scenarios | [x] |

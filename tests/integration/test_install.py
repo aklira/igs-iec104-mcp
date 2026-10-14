@@ -395,7 +395,12 @@ def test_a_dry_run_with_a_client_registers_nothing(harness: Harness) -> None:
     assert not (harness.clients / "claude.json").exists()
 
 
-def test_the_generic_client_mode_is_refused_for_now(harness: Harness) -> None:
+def test_the_generic_mode_prints_the_entry_and_writes_no_client_file(
+    harness: Harness,
+) -> None:
     done = harness.run("--client", "generic", "--project-dir", str(harness.project))
-    assert done.returncode == 2
-    assert "not implemented yet" in done.stderr
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '"mcpServers"' in done.stdout
+    assert "nothing was written" in done.stdout
+    assert not harness.clients.exists()
+    assert harness.state.exists()

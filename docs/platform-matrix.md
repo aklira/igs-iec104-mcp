@@ -68,7 +68,7 @@ Desktop, with the same test suite, before a release.
 | Interoperability with an independent implementation (OpenMUC j60870 1.8.0, black box) | supported in both directions on the bench network, tested | `tests/integration/test_interop_j60870.py` (our client, their station) and `test_interop_j60870_client.py` (their client, our station); a client outside Docker is not yet tested against the peer (D-055) |
 
 | Installation with `scripts/install.sh` | supported on Linux and WSL2 | the steps, the state, and the approvals of [installing with a coding agent](install-agent.md); the registration is never run in CI, which has no client CLI |
-| Registration with Claude Code and Codex | supported and tested with the real CLIs | `--client claude` (user scope) and `--client codex` (global); `--client generic` is not implemented |
+| Registration with Claude Code and Codex | supported and tested with the real CLIs | `--client claude` (user scope) and `--client codex` (global); `--client generic` prints the entry and writes nothing, checked by a handshake of the printed command |
 | Preflight and images check (`doctor`) | supported | read-only, with a temporary project for the handshake; a missing installation image is a warning; `--run-bench` starts containers |
 | A real Codex session calling the server | tested with Codex CLI 0.147.0 (2026-10-14) | Codex asks before each tool call of an MCP server; a session without a person must configure that approval itself, which the installer does not do |
 
