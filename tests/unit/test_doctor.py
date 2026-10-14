@@ -22,6 +22,7 @@ from igs_iec104_mcp.doctor import (
 )
 
 TOOLCHAIN = Path("/pinned/runtime/rust-toolchain.toml")
+MISSING_STATE = Path("/nonexistent/igs-test-state/install.json")
 PODMAN = "unix:///run/user/1000/podman/podman.sock"
 DOCKER = "unix:///var/run/docker.sock"
 ENV = {"XDG_RUNTIME_DIR": "/run/user/1000"}
@@ -33,6 +34,8 @@ class FakeProbe:
     answers: dict[tuple[str, ...], CommandResult] = field(default_factory=dict)
     files: dict[Path, str] = field(default_factory=dict)
     engines: dict[str, EngineReply | str] = field(default_factory=dict)
+    images: set[str] = field(default_factory=set)
+    image_error: str | None = None
 
     def which(self, program: str) -> str | None:
         return self.programs.get(program)
@@ -48,6 +51,11 @@ class FakeProbe:
         if isinstance(answer, str):
             raise EngineUnreachable(answer)
         return answer
+
+    def image_exists(self, host: str, identity: str) -> bool:
+        if self.image_error is not None:
+            raise EngineUnreachable(self.image_error)
+        return identity in self.images
 
 
 def healthy_probe() -> FakeProbe:
@@ -81,11 +89,13 @@ def run(
     platform: str = "linux",
     python_version: tuple[int, int] = (3, 12),
     project_dir: Path | None = None,
+    state_file: Path = MISSING_STATE,
 ) -> Report:
     return run_checks(
         probe,
         engine=engine,
         project_dir=project_dir,
+        state_file=state_file,
         env=ENV if env is None else env,
         uid=uid,
         platform=platform,
@@ -107,6 +117,7 @@ def pinned_machine(monkeypatch: pytest.MonkeyPatch) -> None:
     """The variables the checks read from this machine, fixed for the output tests."""
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.setenv("XDG_STATE_HOME", str(MISSING_STATE.parent))
     monkeypatch.setattr(os, "getuid", lambda: 1000)
 
 
@@ -357,3 +368,76 @@ def test_a_failed_bench_check_makes_the_doctor_exit_with_1(
     )
     assert code == 1
     assert "-> read the run" in capsys.readouterr().out
+
+
+def _installed(path: Path, engine: str = "podman") -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "engine": engine,
+                "runtime_image": "sha256:aa",
+                "relay_image": "sha256:bb",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_the_installation_images_on_the_engine_pass(tmp_path: Path) -> None:
+    probe = healthy_probe()
+    probe.images = {"sha256:aa", "sha256:bb"}
+    images = check(
+        run(probe, state_file=_installed(tmp_path / "install.json")), "images"
+    )
+    assert images.status is Status.OK
+    assert images.data["runtime_image"] == "sha256:aa"
+
+
+def test_a_missing_installation_image_warns_and_names_the_installer(
+    tmp_path: Path,
+) -> None:
+    probe = healthy_probe()
+    probe.images = {"sha256:aa"}
+    report = run(probe, state_file=_installed(tmp_path / "install.json"))
+    images = check(report, "images")
+    assert images.status is Status.WARNING
+    assert images.data["missing"] == "sha256:bb"
+    assert "scripts/install.sh" in images.action
+    assert report.ok
+
+
+def test_no_installation_yet_is_a_warning_not_a_failure() -> None:
+    report = run(healthy_probe())
+    images = check(report, "images")
+    assert images.status is Status.WARNING
+    assert "scripts/install.sh" in images.action
+    assert report.ok
+
+
+def test_images_of_another_engine_are_not_checked_against_this_one(
+    tmp_path: Path,
+) -> None:
+    images = check(
+        run(healthy_probe(), state_file=_installed(tmp_path / "x.json", "docker")),
+        "images",
+    )
+    assert images.status is Status.WARNING
+    assert "the installed images are for docker" in images.action
+
+
+def test_no_image_check_without_a_working_engine(tmp_path: Path) -> None:
+    probe = healthy_probe()
+    del probe.engines[PODMAN]
+    report = run(probe, state_file=_installed(tmp_path / "install.json"))
+    assert all(item.name != "images" for item in report.checks)
+
+
+def test_an_engine_that_does_not_answer_about_images_warns(tmp_path: Path) -> None:
+    probe = healthy_probe()
+    probe.image_error = "connection reset"
+    images = check(
+        run(probe, state_file=_installed(tmp_path / "install.json")), "images"
+    )
+    assert images.status is Status.WARNING
+    assert "connection reset" in images.detail

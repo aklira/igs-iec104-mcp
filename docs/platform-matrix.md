@@ -10,7 +10,9 @@ not that the protocol behaves as the standard requires.
 | Platform | Engine | What ran | Result |
 | --- | --- | --- | --- |
 | Linux, GitHub-hosted runner (`ubuntu-latest`) | Docker Engine | the Python gate, the Rust gate, the runtime image, and the integration tests with both images built in CI | passing, run 38230065120 (commit `ed12501`) |
+| Linux, GitHub-hosted runner (`ubuntu-latest`), fresh checkout | Docker Engine | the job `install`: the installer twice, the state's identities, the server's handshake, the example bench with its cleanup checked, and the registration tests | passing, pull request #2 (commit `c32d2ae`) |
 | Linux on WSL2 (Ubuntu 26.04, kernel 6.18) | Podman 5.7.0, rootless, Docker-compatible socket | the full integration suite with the release runtime binary | 35 passed, none skipped (V2c, 2026-10-12) |
+| Linux on WSL2 (Ubuntu 26.04, kernel 6.18) | Podman 5.7.0, rootless | the installation of [install-agent](install-agent.md) on a clone of the commit: the installer, the approval stop, the level 1 and level 2 checks, and the registration with the real Claude Code CLI | passed (I8, 2026-10-14) |
 | Windows with Docker Desktop (WSL2 backend) | Docker Desktop | not run | **open**: needed before a release |
 | macOS with Docker Desktop | Docker Desktop | not run | not tested |
 | Windows without WSL, or native Windows | any | not run | not supported |
@@ -28,6 +30,9 @@ Desktop, with the same test suite, before a release.
 | Runtime image base | `rust:1.99.0-trixie` to build, `debian:trixie-slim` to run |
 | Relay image base | a Python image pinned by its digest |
 | Podman (tested) | 5.7.0 |
+| Claude Code CLI (tested) | 2.1.232 (registration and connection checked) |
+| Codex CLI (tested) | 0.147.0 (registration and a tool call checked) |
+| uv (installer and tests) | 0.13.1 |
 | MCP SDK | `mcp` 2.3.0 (`uv.lock`) |
 
 ## Feature support
@@ -62,6 +67,11 @@ Desktop, with the same test suite, before a release.
 | Controlled faults (interruption, latency) | supported on Docker and tested | the interrupt and latency scenarios of V3c (D-051); a stop of the proxy's own container is not tested |
 | Interoperability with an independent implementation (OpenMUC j60870 1.8.0, black box) | supported in both directions on the bench network, tested | `tests/integration/test_interop_j60870.py` (our client, their station) and `test_interop_j60870_client.py` (their client, our station); a client outside Docker is not yet tested against the peer (D-055) |
 
+| Installation with `scripts/install.sh` | supported on Linux and WSL2 | the steps, the state, and the approvals of [installing with a coding agent](install-agent.md); the registration is never run in CI, which has no client CLI |
+| Registration with Claude Code and Codex | supported and tested with the real CLIs | `--client claude` (user scope) and `--client codex` (global); `--client generic` is not implemented |
+| Preflight and images check (`doctor`) | supported | read-only, with a temporary project for the handshake; a missing installation image is a warning; `--run-bench` starts containers |
+| A real Codex session calling the server | tested with Codex CLI 0.147.0 (2026-10-14) | Codex asks before each tool call of an MCP server; a session without a person must configure that approval itself, which the installer does not do |
+
 ### What the runtime does not handle
 
 These limits come from the upstream library's support matrix at the pinned revision (`docs/capabilities.md`). A
@@ -92,8 +102,9 @@ generic path, which the scenarios do not use.
 The release is gated on these items, in this order:
 
 1. The Docker Desktop checks above, on a machine with Docker Desktop.
-2. The remaining tasks of the plan: Phase I (the agent-friendly installation, issue #1), and V5, the release
-   decision of a maintainer. X3 (interoperability, D-055) and V3 (controlled faults, D-051) are done.
+2. The remaining tasks of the plan: V5, the release decision of a maintainer. X3 (interoperability, D-055), V3
+   (controlled faults, D-051), and Phase I (the agent-friendly installation, issue #1) are done. Phase I is confirmed on
+   `main` once its pull request is merged.
 3. A review of this matrix and of the limitations by a maintainer, and of the licences (`scripts/check_licences.py`
    and `cargo deny`).
 

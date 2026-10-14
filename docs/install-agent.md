@@ -137,7 +137,8 @@ PYTHONPATH=src uv run --locked python -m igs_iec104_mcp.doctor --server-only
 ```
 
 Expected output: `server ok`, `tools ok` (19 tools), `bench-validate ok`, and `All required checks passed.`
-with exit code 0. This check starts the server, lists its tools, and validates the example bench. It starts no
+with exit code 0. The preflight also reports `images`: `ok` once the installer has built the images, or `warn` with the
+command to run when they are missing. This check starts the server, lists its tools, and validates the example bench. It starts no
 container and stores nothing.
 
 Then check the registration with the client:
@@ -168,6 +169,10 @@ If `bench-run` fails, the temporary project of the run is kept, and its path is 
 
 Start a new session of the client, and ask it for the tools of `igs-iec104`. In Claude Code, `/mcp` shows the
 state of the server. Codex: `codex mcp list` lists it.
+
+Codex asks for approval before each tool call of an MCP server. A session that runs without a person cannot
+give that approval, so it must be configured by a person, for example with `default_tools_approval_mode` for this server.
+The installer does not set it.
 
 ## Stop and ask the person
 

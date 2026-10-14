@@ -1396,3 +1396,24 @@ test can show it.
   preflight found). The client's CLI is used for every change; the installer never edits a client's configuration file.
 - Verified: unit tests with a table of command answers, and integration tests with stub client CLIs whose behaviour
   matches the real ones (a duplicate is refused by Claude and overwritten by Codex, exit 0 in both cases).
+
+## D-062: The preflight checks the installation's images, and a missing image is a warning (issue #1, finishing)
+
+- Date: 2026-10-14. The issue asks the doctor to check the image identities (point 3). The check reads the installation's
+  images from the state file of the installer, or from `--runtime-image` and `--relay-image`, and asks the engine for each.
+- Decision: the check is `images`. It is OK when both identities are on the engine. It is a WARNING when one is missing,
+  when no installation is known for this engine, or when the engine does not answer about the images. It is never a FAIL:
+  the installer runs the preflight before it builds the images, and a FAIL would stop the first installation.
+- Why a warning and not a skip: a warning says what is missing and names `scripts/install.sh` as the step to take, and
+  the report keeps it visible.
+- Verified: unit tests for each case (`tests/unit/test_doctor.py`), and by hand on Podman 5.7.0 with the installer's state
+  (`ok`) and with an absent identity (`warn`, the installer's step, exit 0).
+
+## D-063: A real Codex session needs the approval of the server's tools configured by a person (issue #1, finishing)
+
+- Date: 2026-10-14. A real Codex session (CLI 0.147.0) connected to the server, and `bench_validate` returned `valid: true`
+  once the approval of this server's tools was set for that invocation (`default_tools_approval_mode`). Without it, Codex
+  cancels each tool call of an MCP server in a non-interactive run.
+- Decision: the installer does not set that approval. An interactive session asks the person, and a session without a
+  person needs the approval set by a person. The install guide says so (step 7), and the platform matrix records the
+  session.

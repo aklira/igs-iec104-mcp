@@ -26,11 +26,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from docker.errors import DockerException
+from docker.errors import DockerException, NotFound
 
 # The SDK ships no type hints (see pyproject.toml): its client is typed Any here.
 from docker import DockerClient  # type: ignore[attr-defined]
-from igs_iec104_mcp.bench_run import bench_checks
+from igs_iec104_mcp.bench_run import bench_checks, default_state_file, images_for
 from igs_iec104_mcp.checks import Check, Report, Status
 from igs_iec104_mcp.handshake import run_server_checks
 
@@ -71,6 +71,11 @@ class Probe(Protocol):
 
     def engine_version(self, host: str) -> EngineReply:
         """Raises EngineUnreachable when the engine does not answer."""
+        ...
+
+    def image_exists(self, host: str, identity: str) -> bool:
+        """Whether the engine holds the image of this identity. Raises
+        EngineUnreachable when the engine does not answer."""
         ...
 
 
@@ -116,6 +121,22 @@ class SystemProbe:
             kind=engine_kind(info.get("Components") or []),
             version=str(info.get("Version", "unknown")),
         )
+
+    def image_exists(self, host: str, identity: str) -> bool:
+        socket = Path(host.removeprefix("unix://"))
+        if host.startswith("unix://") and not socket.exists():
+            raise EngineUnreachable(f"no socket at {socket}")
+        try:
+            client = DockerClient(base_url=host, timeout=ENGINE_TIMEOUT)
+            try:
+                client.images.get(identity)
+                return True
+            except NotFound:
+                return False
+            finally:
+                client.close()
+        except Exception as error:  # the SDK raises several types; the probe names one
+            raise EngineUnreachable(str(error)) from error
 
 
 def engine_kind(components: Sequence[Mapping[str, Any]]) -> str:
@@ -357,6 +378,56 @@ def check_project_dir(path: Path) -> Check:
     )
 
 
+def check_images(
+    probe: Probe,
+    engine: Check | None,
+    runtime_image: str | None,
+    relay_image: str | None,
+    state_file: Path,
+) -> Check | None:
+    """Whether the installation's images are on the engine. A missing image is a
+    WARNING, not a FAIL: the installer runs this check before it builds the images."""
+    if engine is None or engine.status is Status.FAIL:
+        return None
+    kind = engine.data.get("engine", "")
+    host = engine.data.get("host", "")
+    images = images_for(kind, runtime_image, relay_image, state_file)
+    if isinstance(images, str):
+        return Check(
+            "images",
+            Status.WARNING,
+            "no installation image is known for this engine",
+            images,
+        )
+    missing = []
+    for identity in (images.runtime, images.relay):
+        try:
+            if not probe.image_exists(host, identity):
+                missing.append(identity)
+        except EngineUnreachable as error:
+            return Check(
+                "images",
+                Status.WARNING,
+                f"the engine did not answer about the images: {error}",
+                "check the engine, then run the doctor again",
+            )
+    if missing:
+        return Check(
+            "images",
+            Status.WARNING,
+            f"{len(missing)} image(s) of the installation are not on the engine",
+            "run scripts/install.sh again: it builds the images and names them by "
+            "identity",
+            data={"missing": ", ".join(missing)},
+        )
+    return Check(
+        "images",
+        Status.OK,
+        "the runtime and relay images are on the engine",
+        data={"runtime_image": images.runtime, "relay_image": images.relay},
+    )
+
+
 def run_checks(
     probe: Probe,
     *,
@@ -367,10 +438,14 @@ def run_checks(
     platform: str | None = None,
     python_version: tuple[int, int] | None = None,
     toolchain: Path = RUNTIME_TOOLCHAIN,
+    runtime_image: str | None = None,
+    relay_image: str | None = None,
+    state_file: Path | None = None,
 ) -> Report:
     """Runs the checks in order. The arguments default to this machine."""
     environment = os.environ if env is None else env
     current_uid = os.getuid() if uid is None else uid
+    engine_check = check_engine(probe, engine, environment, current_uid)
     checks = [
         check_host(
             sys.platform if platform is None else platform,
@@ -382,10 +457,19 @@ def run_checks(
         check_uv(probe),
         check_rust(probe, toolchain),
         check_openssl(probe),
-        check_engine(probe, engine, environment, current_uid),
+        engine_check,
         check_client(probe, "claude"),
         check_client(probe, "codex"),
     ]
+    images = check_images(
+        probe,
+        engine_check,
+        runtime_image,
+        relay_image,
+        default_state_file() if state_file is None else state_file,
+    )
+    if images is not None:
+        checks.append(images)
     if project_dir is not None:
         checks.append(check_project_dir(project_dir))
     return Report(tuple(checks))
@@ -450,11 +534,13 @@ def main(
     )
     parser.add_argument(
         "--runtime-image",
-        help="the runtime image of the run, by identity (default: scripts/install.sh)",
+        help="the runtime image, by identity: checked on the engine, and used by "
+        "--run-bench (default: the state of scripts/install.sh)",
     )
     parser.add_argument(
         "--relay-image",
-        help="the relay image of the run, by identity (default: scripts/install.sh)",
+        help="the relay image, by identity: checked on the engine, and used by "
+        "--run-bench (default: the state of scripts/install.sh)",
     )
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     args = parser.parse_args(argv)
@@ -464,7 +550,11 @@ def main(
     engine: Check | None = None
     if not args.server_only:
         report = run_checks(
-            probe or SystemProbe(), engine=args.engine, project_dir=args.project_dir
+            probe or SystemProbe(),
+            engine=args.engine,
+            project_dir=args.project_dir,
+            runtime_image=args.runtime_image,
+            relay_image=args.relay_image,
         )
         checks.extend(report.checks)
         engine = next(
