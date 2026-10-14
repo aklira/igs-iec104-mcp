@@ -53,6 +53,7 @@ Desktop, with the same test suite, before a release.
 | Stop of a managed station | supported, for good | `stop_instance`; its logs are kept; a restart is refused |
 | TLS on both roles | supported and tested | upstream settings; acceptance and rejection scenarios; a refused client records a security alarm |
 | Redundancy group of a client (2 to 8 stations) | supported and tested | the group starts one station and switches to another |
+| Several clients on one station | one client's transfer at a time: the last one started (the upstream redundancy rule); the others are closed | reproduced on the clean install, 2026-10-14 (issue #4); the scenario check refuses an order that cannot pass ([docker](docker.md#one-station-several-clients)) |
 | Connection through a fault proxy | supported on Docker and tested | `fault_proxy: true`; `inject_fault` (interrupt, latency) and `clear_fault`, with a reconnection after the clear |
 | Switchover on Docker | supported and tested | `switchover`, and a stop of a group's station |
 | Manual switchover through the control API | not exposed | the library provides it; the control API does not |
@@ -88,6 +89,9 @@ generic path, which the scenarios do not use.
 
 - A group station must be connected before a scenario stops it. The step waits for that station's loss; it does not
   read the group's history, so a stop of a station that the group never connected to times out.
+- Two clients on one station: the one that started its transfer last receives the data, and the other is closed. A
+  step that needs the closed client's data times out. The scenario check refuses the order when the steps make it
+  certain; a `parallel` step or a redundancy group is not judged.
 - A client's TLS security events are discarded by the runtime. A station's security alarms are recorded.
 - A bench that connects a client to an external target is refused by the planner. Its message names a task that is
   done; the connection is not supported yet.
