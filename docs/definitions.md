@@ -195,6 +195,21 @@ may also set a `global_timeout`; when it passes, the run fails and its cleanup s
 
 The exact fields of each action are in the scenario schema (`contracts/definitions/scenario.schema.json`).
 
+### One station, several clients
+
+A station serves the data of one client at a time: the client that started its transfer last. A `start_transfer`
+of a client closes the other clients of that station that are not stopped (see [Docker benches](docker.md#one-station-several-clients)).
+The check of a scenario follows the order of its steps, and refuses a `general_interrogation` or an `expect_point`
+of a client that another client has superseded. Its message names both clients and the station:
+
+```text
+steps[2]: 'client-1' was superseded by 'client-2' on 'server-1': a station serves one client's transfer at a time, so this step gets no answer. Run it before 'client-2' starts its transfer; starting 'client-1' again closes 'client-2' in turn
+```
+
+The check judges only what the bench makes certain. A client that connects to a redundancy group, and a station that
+a group connects to, are not judged; neither are the steps of a `parallel` step. A stop or a start of an instance, and
+a fault on a connection, end what the check knows about that client, so it does not refuse a later step on them.
+
 ### Assertions and cursors
 
 An assertion looks at what happens after its step starts, not at earlier events: the events are read from a cursor

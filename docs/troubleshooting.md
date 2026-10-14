@@ -71,6 +71,13 @@ value that did not match are all visible there. Raise the step's `timeout` only 
 **A step ends `indeterminate`.** A request was sent, and the connection ended before its answer. The runtime does not
 send it again, and neither does the server. Decide from the station's state whether to repeat the action in a new run.
 
+**A `general_interrogation` or an `expect_point` ends `timed_out` with two clients on one station.** A station serves
+the data of one client at a time: the client that started its transfer last. The other one was closed, and gets no
+answer. The scenario check refuses this order when the steps make it certain, with a message that names the clients. It does
+not judge a `parallel` step or a redundancy group, so there the timeout is the only sign: look at the `start_transfer`
+steps of the other clients. See
+[one station, several clients](definitions.md#one-station-several-clients).
+
 **A step ends `unsupported`.** The step asks for something the runtime or the bench does not support, such as a
 bitstring command. The [platform matrix](platform-matrix.md#feature-support) lists what is supported.
 

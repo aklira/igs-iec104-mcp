@@ -1432,3 +1432,27 @@ test can show it.
 - Verified: `tests/unit/test_registration.py` (entry, text, and no client run), `tests/integration/test_generic_client.py`
   (the printed command starts the server), `tests/integration/test_install.py` (the installer prints the entry and writes no
   client file).
+
+## D-065: A station serves one client's transfer at a time, and the scenario check refuses an order that cannot pass (issue #4)
+
+- Date: 2026-10-14 (issue #4, not a task of the plan). The maintainer asked for the documentation and the validation
+  corrections after a reproduction on the clean installation.
+- Decision: the connections of one station form a redundancy group in the upstream library, as the runtime uses it:
+  only the connection that started its transfer last carries the data, and a start closes the other connections of the
+  station that are not stopped (IEC 60870-5-104 §10, as the library implements it). The scenario check
+  (`check_transfers` in `models/scenario.py`) follows the order of the `start_transfer` steps, and refuses a
+  `general_interrogation` or an `expect_point` for a client that another client superseded on the same station. It
+  judges only a client that connects to one station, on a station that no redundancy group connects to, and it does not
+  judge the steps of a `parallel` step. A stop or start of an instance, and a fault on a connection, end what the check
+  knows about its clients.
+- Why a validation error and not a warning: the step cannot pass, and the run would only time out after its deadline.
+  The check is certain only in the cases above; the other cases stay as they were.
+- Why the check does not refuse `wait_transfer_started` or `assert_point`: a superseded client may still report its
+  transfer as started, and its image keeps the last values, so those steps may pass. Only the two steps that need new
+  data from the station are certain to time out.
+- Not changed: the runtime and the library. The timeout is the expected result of the rule; a clearer failure message
+  (naming the superseding connection from the station's `Superseded` event) is a possible follow-up, not part of this
+  decision.
+- Verified: `tests/unit/test_scenario_transfers.py` (ten tests: the order, the restart, a stopped client, two stations, a
+  redundancy group, a parallel step); the reproduction on the clean installation (two clients started, the first one
+  interrogated: timeout at 40 s; only the last one started: passes; a second client connected but not started: passes).

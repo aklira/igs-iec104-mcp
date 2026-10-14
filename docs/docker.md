@@ -88,6 +88,18 @@ The `switchover` and `stop_instance` steps test this; see [scenarios](definition
 The planner gives each station a position in the group, in the order the bench names its connections. The events
 of a group name the station by that position (`endpoint`).
 
+### One station, several clients
+
+The same rule applies to a station with several clients. All the connections of one station form a redundancy
+group: only one of them carries the data at a time, the one that started its transfer last. When a client starts its
+transfer, the other clients of that station that are not stopped are closed. Two clients on one station therefore do
+not both receive its spontaneous updates, and a general interrogation of the closed client gets no answer.
+
+The scenario check refuses a `general_interrogation` or an `expect_point` for a client that another client of the
+same station has superseded, when the steps of the scenario make that order certain. It does not judge a `parallel`
+step, or a client of a redundancy group. To observe the same station from two clients, give each client its own
+station, or run the steps of one client before the other client starts. See [scenarios](definitions.md#one-station-several-clients).
+
 ## Managed instances and their stop
 
 A managed instance can be stopped by a scenario, for good: its container gets SIGTERM with a grace of ten seconds,

@@ -353,8 +353,94 @@ def check_scenario(scenario: Scenario, bench: TestBench) -> None:
     checker = _Checker(bench)
     for where, steps in (("steps", scenario.steps), ("cleanup", scenario.cleanup)):
         checker.steps(steps, where, issues)
+    check_transfers(scenario, bench, issues)
     if issues:
         raise DefinitionError(issues)
+
+
+def check_transfers(scenario: Scenario, bench: TestBench, issues: list[Issue]) -> None:
+    """Refuses a step that needs a client's data after another client of the same
+    station has started its transfer.
+
+    A station serves the data transfer of one connection at a time: when a connection
+    starts its transfer, the other connections of the station that are not stopped are
+    closed (the redundancy rule of IEC 60870-5-104 §10, as the upstream library
+    implements it). The step of a closed client gets no answer and no observation, so
+    it times out. The check follows the order of the steps, and it judges only what the
+    bench makes certain: a client that connects to one station, on a station that no
+    redundancy group connects to.
+    """
+    links: dict[str, list[str]] = {}
+    for connection in bench.connections:
+        links.setdefault(connection.client, []).append(connection.server)
+    station_of = {
+        client: servers[0] for client, servers in links.items() if len(servers) == 1
+    }
+    clients_of: dict[str, set[str]] = {}
+    for client, server in station_of.items():
+        clients_of.setdefault(server, set()).add(client)
+    unchecked = {
+        server for servers in links.values() if len(servers) > 1 for server in servers
+    }
+    # A parallel step runs its branches in no fixed order: its stations are not judged.
+    for step in scenario.steps:
+        if isinstance(step, Parallel):
+            unchecked |= {
+                station_of.get(name, name) for name in _named_in(step.branches)
+            }
+
+    started: set[str] = set()
+    superseded: dict[str, str] = {}
+
+    def forget(clients: set[str]) -> None:
+        for client in clients:
+            started.discard(client)
+            superseded.pop(client, None)
+
+    for index, step in enumerate(scenario.steps):
+        where = f"steps[{index}]"
+        if isinstance(step, StartTransfer):
+            station = station_of.get(step.client)
+            if station is None or station in unchecked:
+                continue
+            for other in (started & clients_of[station]) - {step.client}:
+                superseded[other] = step.client
+                started.discard(other)
+            started.add(step.client)
+            superseded.pop(step.client, None)
+        elif isinstance(step, (GeneralInterrogation, ExpectPoint)):
+            by = superseded.get(step.client)
+            station = station_of.get(step.client)
+            if by is not None and station is not None and station not in unchecked:
+                issues.append(
+                    Issue(
+                        where,
+                        f"{step.client!r} was superseded by {by!r} on {station!r}: a "
+                        "station serves one client's transfer at a time, so this step "
+                        f"gets no answer. Run it before {by!r} starts its transfer; "
+                        f"starting {step.client!r} again closes {by!r} in turn",
+                    )
+                )
+        elif isinstance(step, (StopInstance, StartInstance)):
+            # A station that stops or starts closes its connections: no client keeps its
+            # place in the order.
+            forget(clients_of.get(step.instance, {step.instance}))
+        elif isinstance(step, (InjectFault, ClearFault)):
+            forget({step.client})
+
+
+def _named_in(branches: list[list[Step]]) -> set[str]:
+    """The instances and clients that the steps of the branches name, at any depth."""
+    names: set[str] = set()
+    for branch in branches:
+        for step in branch:
+            if isinstance(step, Parallel):
+                names |= _named_in(step.branches)
+            elif isinstance(step, (StopInstance, StartInstance)):
+                names.add(step.instance)
+            elif hasattr(step, "client"):
+                names.add(step.client)
+    return names
 
 
 class _Checker:
