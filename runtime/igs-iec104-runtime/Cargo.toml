@@ -18,7 +18,7 @@ igs-iec104-codec = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc
 igs-iec104-link = { git = "https://github.com/aklira/igs-iec104", rev = "e91ecc824fcbc750262a5c8505c8812457d200c1" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.152"
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
@@ -27,4 +27,4 @@ name = "igs-iec104-runtime"
 path = "src/main.rs"
 
 [dev-dependencies]
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "test-util"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "test-util"] }
