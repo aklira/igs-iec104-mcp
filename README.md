@@ -8,6 +8,22 @@ and the evidence of each run.
 The server is a Python 3.12 program that speaks MCP over stdio, or over Streamable HTTP on the loopback. The protocol runtime is a Rust program, packaged
 in a container image. The protocol work is done by the upstream library, pinned by revision (`runtime/Cargo.toml`).
 
+## Architecture
+
+![Architecture of igs-iec104-mcp: the MCP interface, run execution, definitions, bench runtime and run evidence](docs/diagram.png)
+
+The MCP client calls the server's tools. The server loads the project's definitions, starts a run controller for
+each run, and serves the reports and the run records. The layers are:
+
+- **MCP interface**: the server and its transport (stdio or Streamable HTTP on the loopback).
+- **Definitions**: the bench and scenario models, the project store, and the target policy that limits where a bench
+  may connect.
+- **Run execution**: the run controller, which plans the bench and runs the scenario through its engine, actions and
+  confirmation checks.
+- **Bench runtime**: the bench planner and the container engine adapter, which provision the containers; the runtime
+  control API, which dispatches the station and client roles built on `igs-iec104`; and fault injection.
+- **Run evidence**: the run journal, the reports, and the artifact retention.
+
 ## Documentation
 
 | Document | What it covers |
