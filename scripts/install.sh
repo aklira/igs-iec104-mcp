@@ -139,6 +139,9 @@ case "$engine_kind" in
 esac
 
 echo "==> images, built with $ENGINE_CLI"
+# Docker adds provenance and SBOM attestations to a build by default. They carry build times, so
+# the identity of an unchanged image would change on every run. Podman ignores this variable.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 "$ENGINE_CLI" build --file docker/runtime.Dockerfile --tag "$RUNTIME_TAG" runtime
 "$ENGINE_CLI" build --file docker/relay.Dockerfile --tag "$RELAY_TAG" docker
 
